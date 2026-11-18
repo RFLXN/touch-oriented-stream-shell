@@ -30,7 +30,7 @@
 # `strict = false`면 선언된 항목만 고정하고(해제 불가 권한, 수정/삭제 불가 명령) 나머지 권한과 명령은 사용자가 추가할 수 있다.
 # `config`를 생략(`null`)하면 모든 권한과 명령을 사용자 설정에 맡긴다.
 # 선언된 내용은 읽기 전용 `/etc/toss-connector/managed.json`으로 배치되며, 빌드 타임에 `toss-connector`로 검증해
-# 알 수 없는 권한이나 잘못된 명령 형식이 있으면 빌드가 실패한다(`app/host/src/managed.rs`).
+# 알 수 없는 권한이나 잘못된 명령 형식이 있으면 빌드가 실패한다(`src/app/host/src/managed.rs`).
 #
 # 실행 중 생성되는 상태(키, 페어링, 덱 주소, 콘솔 토큰)는 각 사용자의 `~/.config/toss-connector`에 저장된다
 # (`docs/04-host-link.md` 4.9절, 4.10절). `strict` 모드에서도 페어링은 정상 동작한다.

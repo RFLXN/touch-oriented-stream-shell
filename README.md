@@ -16,10 +16,20 @@
 
 | 구성 요소 | 위치 | 역할 |
 |---|---|---|
-| 기기 이미지 | `nix/`, `os/`, `scripts/` | 메인라인 Linux 6.18 + Alpine Linux 3.24. Nix로 빌드한다 |
-| `tossd` | `app/tossd` | 덱에서 동작하는 데몬(Rust) |
-| `toss-shell` | `app/ui` | 덱의 UI(QML). Wayland 키오스크(`cage`)에서 전체 화면으로 실행된다 |
-| `toss-connector` | `app/host` | PC 측 프로그램(Rust, Linux). 덱에 접속해 PC와 연결하고 웹 콘솔을 제공한다 |
+| 기기 이미지 | `nix/`, `src/os/`, `src/scripts/` | 메인라인 Linux 6.18 + Alpine Linux 3.24. Nix로 빌드한다 |
+| `tossd` | `src/app/tossd` | 덱에서 동작하는 데몬(Rust) |
+| `toss-shell` | `src/app/ui` | 덱의 UI(QML). Wayland 키오스크(`cage`)에서 전체 화면으로 실행된다 |
+| `toss-connector` | `src/app/host` | PC 측 프로그램(Rust, Linux). 덱에 접속해 PC와 연결하고 웹 콘솔을 제공한다 |
+
+저장소의 폴더는 다섯이다.
+
+| 폴더 | 내용 |
+|---|---|
+| `src/` | 소스: 덱 앱과 PC 측 프로그램(`app/`), 커널·rootfs 설정(`os/`), 스크립트(`scripts/`) |
+| `nix/` | 이미지 빌드 정의, `toss-connector` 패키지와 NixOS 모듈 |
+| `docs/` | 문서 |
+| `dist/` | 빌드 산출물(git 제외) |
+| `local/` | 기기 백업, 순정 이미지 등 로컬 자료(git 제외) |
 
 ## 준비물
 
@@ -39,21 +49,21 @@
 처음 한 번은 순정 기기를 플래싱 모드로 넣고, 원본을 백업하고, 순정 761로 다운그레이드해야 한다. 절차와 주의 사항은 [docs/02-progress.md](docs/02-progress.md) 2.2~2.5절을 순서대로 따른다. 그 과정에서 쓰는 주요 명령은 다음과 같다.
 
 ```bash
-nix develop -c scripts/fetch-loader.sh
+nix develop -c src/scripts/fetch-loader.sh
 ```
 
 ```bash
-nix develop -c scripts/backup.sh
+nix develop -c src/scripts/backup.sh
 ```
 
 ```bash
-nix develop -c scripts/downgrade.sh
+nix develop -c src/scripts/downgrade.sh
 ```
 
 그다음부터는 명령 하나로 빌드부터 플래싱·재부팅까지 진행한다(2.6~2.7절).
 
 ```bash
-nix develop -c scripts/deploy.sh
+nix develop -c src/scripts/deploy.sh
 ```
 
 부팅하면 약 20초 뒤 스트림덱 UI가 뜬다. 저장소를 수정한 뒤에도 같은 명령으로 다시 올린다. 저장된 Wi-Fi, 페어링 목록, 레이아웃 같은 사용자 데이터는 기기의 `/data`에 남아 재플래싱 후에도 유지된다.
@@ -63,7 +73,7 @@ nix develop -c scripts/deploy.sh
 바로 실행하려면:
 
 ```bash
-nix build .#toss-connector && ./result/bin/toss-connector
+nix build .#toss-connector -o dist/toss-connector && ./dist/toss-connector/bin/toss-connector
 ```
 
 NixOS에서는 시스템 flake에 이 저장소를 입력(`toss-front`)으로 추가하고 모듈을 켜면 로그인 시 자동 실행된다. 권한과 명령을 설정에 선언해 고정할 수도 있다([docs/04-host-link.md](docs/04-host-link.md) 4.10절).
@@ -75,7 +85,7 @@ modules = [
 ];
 ```
 
-아래의 `toss-connector` 명령은 설치된 상태를 기준으로 적었다. `nix build`로 실행했다면 `./result/bin/toss-connector`로 바꿔 쓴다.
+아래의 `toss-connector` 명령은 설치된 상태를 기준으로 적었다. `nix build`로 실행했다면 `./dist/toss-connector/bin/toss-connector`로 바꿔 쓴다.
 
 ### 3. 페어링
 
@@ -117,15 +127,15 @@ toss-connector wake
 
 - **기본 이미지는 SSH가 열려 있고 root에 비밀번호가 없다.** 공유기가 외부 접속을 차단하는 내부망에서 쓴다는 전제다. 쓰지 않을 때는 덱의 설정 → `NETWORK` → `SSH`에서 끈다(재플래싱·재부팅 후에도 유지된다).
 - 순정 761 이미지는 익명으로 배포된 파일이다. 체크섬은 이 프로젝트에서 실제로 사용해 동작을 확인한 파일과 같다는 것만 보장한다.
-- `backup/`, `downgrade/`, `archive/`, `device/`는 git에 포함되지 않는다. 기기 고유 정보가 들어 있으므로 공유하지 말고 별도로 백업한다.
+- `local/backup/`, `local/downgrade/`, `local/archive/`, `local/device/`는 git에 포함되지 않는다. 기기 고유 정보가 들어 있으므로 공유하지 말고 별도로 백업한다.
 - 검증한 범위와 확인하지 못한 것은 [docs/02-progress.md](docs/02-progress.md) 2.12절과 [docs/04-host-link.md](docs/04-host-link.md) 4.13절에 정리돼 있다.
 
 ## 개발
 
 | 작업 | 방법 |
 |---|---|
-| 기기에 접속 | `scripts/tf-ssh.sh` |
-| 재플래싱 없이 앱 수정 테스트 | `scripts/app-push.sh` (끝나면 `scripts/deploy.sh`로 다시 올린다) |
+| 기기에 접속 | `src/scripts/tf-ssh.sh` |
+| 재플래싱 없이 앱 수정 테스트 | `src/scripts/app-push.sh` (끝나면 `src/scripts/deploy.sh`로 다시 올린다) |
 | 위젯 추가 | [docs/03-userland-guide.md](docs/03-userland-guide.md) 3.17절 |
 | PC 연동 프로토콜 확장 | [docs/04-host-link.md](docs/04-host-link.md) 4.12절 |
 

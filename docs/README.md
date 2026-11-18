@@ -6,7 +6,7 @@
 |---|---|
 | [01-findings.md](01-findings.md) | **조사사항.** 기기에 대해 파악한 사실 전체: 하드웨어, 펌웨어, 부팅, 커널 지원, 유저랜드 실측 결과, 참고 자료 |
 | [02-progress.md](02-progress.md) | **진행상황.** 순정 기기를 현재 상태로 구성하는 절차. 구조 설명과 설계 이유, 검증 범위, 트러블슈팅, 복구 방법, 남은 과제 |
-| [03-userland-guide.md](03-userland-guide.md) | **유저랜드 개발 가이드.** PC 연결, 변경 사항 영속화, 화면 앱 실행 방법. 스트림덱 앱(`app/`) 구조와 용어, 스타일 규칙은 3.16절, 위젯 추가 방법은 3.17절 |
+| [03-userland-guide.md](03-userland-guide.md) | **유저랜드 개발 가이드.** PC 연결, 변경 사항 영속화, 화면 앱 실행 방법. 스트림덱 앱(`src/app/`) 구조와 용어, 스타일 규칙은 3.16절, 위젯 추가 방법은 3.17절 |
 | [04-host-link.md](04-host-link.md) | **덱과 PC의 통신.** 프로토콜(프레이밍, 메시지), 키와 암호화, 페어링, 호스트가 덱에 허용하는 권한, 명령 실행, 절전 및 웨이크업, PC 측 프로그램 `toss-connector`, 덱 측 구현, 확장 방법, 남은 과제 |
 
 처음 읽는다면 진행상황 -> 유저랜드 가이드 순으로 보고, 세부 사실이 필요할 때 조사사항을 참고하면 된다. 덱과 PC 연동 부분을 수정할 때는 덱과 PC의 통신 문서를 보면 된다. 문서 내 절 번호는 파일 번호를 따른다(진행상황 2.x, 가이드 3.x, 덱과 PC 통신 4.x).
@@ -16,10 +16,10 @@
 | 이름 | 설명 |
 |---|---|
 | **TOSS** (Touch Oriented Stream Shell) | 이 프로젝트 및 덱 전체 화면을 담당하는 앱. 토스 프론트 하드웨어에서 동작하지만 토스(비바리퍼블리카)와 무관한 개인 프로젝트다 |
-| `tossd` | 덱에서 동작하는 데몬(`app/tossd`) |
-| `toss-shell` | 덱의 UI(`app/ui`, 기기 내 `/usr/bin/toss-shell`) |
-| `toss-connector` | PC 측 프로그램(`app/host`). 덱에 접속해 PC와 연결한다 |
-| `toss-proto` | 덱과 PC 간 통신 프로토콜 크레이트(`app/proto`) |
+| `tossd` | 덱에서 동작하는 데몬(`src/app/tossd`) |
+| `toss-shell` | 덱의 UI(`src/app/ui`, 기기 내 `/usr/bin/toss-shell`) |
+| `toss-connector` | PC 측 프로그램(`src/app/host`). 덱에 접속해 PC와 연결한다 |
+| `toss-proto` | 덱과 PC 간 통신 프로토콜 크레이트(`src/app/proto`) |
 | `toss-helper` | 덱에서 root 권한이 필요한 작업(전원 종료, 절전, SSH 제어)을 대행하는 도우미 |
 
 2026-11-17에 명칭을 확정했다.
@@ -53,17 +53,17 @@
 
 ## 원칙: 기기 상태는 저장소에서 재현
 
-기기는 언제든 초기화할 수 있는 대상으로 본다. 기기에 올리는 이미지는 모두 이 저장소에서 Nix로 빌드하며(`scripts/build-all.sh`), 동일 커밋에서는 바이트 단위로 동일한 이미지가 생성된다. 기기 내부에서 직접 수정한 내용은 임시 실험일 뿐이며, 유지하려면 저장소에 반영해야 한다.
+기기는 언제든 초기화할 수 있는 대상으로 본다. 기기에 올리는 이미지는 모두 이 저장소에서 Nix로 빌드하며(`src/scripts/build-all.sh`), 동일 커밋에서는 바이트 단위로 동일한 이미지가 생성된다. 기기 내부에서 직접 수정한 내용은 임시 실험일 뿐이며, 유지하려면 저장소에 반영해야 한다.
 
 **예외는 사용자가 기기에서 직접 설정한 데이터다.** 저장된 Wi-Fi, 페어링 목록, 위젯 배치, 화면 밝기 등은 기기의 `/data`에 저장되어 재플래싱 후에도 유지된다. 이 데이터는 이미지나 저장소에 포함되지 않는다([03-userland-guide.md](03-userland-guide.md) 3.15절 "기기에만 남는 데이터").
 
 | 작업 | 위치 |
 |---|---|
-| 저장소 -> 기기 배포 | `scripts/deploy.sh` ([02-progress.md](02-progress.md) 2.7절) |
+| 저장소 -> 기기 배포 | `src/scripts/deploy.sh` ([02-progress.md](02-progress.md) 2.7절) |
 | 이미지 빌드 옵션 | `flake.nix`의 `buildImage { … }` ([02-progress.md](02-progress.md) 2.6절) |
 | 빌드 재현성 고정 요소 | [02-progress.md](02-progress.md) 2.6절 |
 | 변경 사항 영속화 | [03-userland-guide.md](03-userland-guide.md) 3.6절 |
-| 재플래싱 없이 앱 수정 테스트 | `scripts/app-push.sh` ([03-userland-guide.md](03-userland-guide.md) 3.16절) |
+| 재플래싱 없이 앱 수정 테스트 | `src/scripts/app-push.sh` ([03-userland-guide.md](03-userland-guide.md) 3.16절) |
 | 새 앱(위젯) 추가 | [03-userland-guide.md](03-userland-guide.md) 3.17절 |
 | PC 연동 프로토콜 확장 | [04-host-link.md](04-host-link.md) 4.12절 |
 
@@ -71,11 +71,13 @@
 
 | 경로 | 내용 |
 |---|---|
-| `flake.nix` | 이미지 빌드 옵션, devShell, PC 측 프로그램의 패키지 및 NixOS 모듈 정의 |
+| `flake.nix` | 이미지 빌드 옵션, devShell, PC 측 프로그램의 패키지 및 NixOS 모듈 정의. 빌드 정의는 `nix/`, 소스는 `src/` 아래에 있다 |
 | `nix/` | 이미지 빌드 정의(`build.nix`, 내부에서 호출하는 `inputs.nix`·`kernel.nix`, `build-rootfs.sh`, `build-initramfs.sh`), PC 측 프로그램 패키지(`toss-connector.nix`), NixOS 모듈(`nixos-module.nix`) 및 모듈 검증(`module-check.nix`) |
-| `os/` | 커널 설정·디바이스 트리·드라이버, initramfs, rootfs 설정, Alpine 패키지 목록 및 락파일 |
-| `app/` | 스트림덱 앱. `tossd/` 데몬(Rust), `ui/` 화면(QML: `shell/` 뼈대, `kit/` 컴포넌트, `widgets/` 앱 위젯), `rootfs/` 기기 배치 파일, `proto/` 덱-PC 프로토콜, `meter/` 리소스 측정(덱/PC 공용), `host/` PC 측 프로그램 `toss-connector`(`console/`은 웹 콘솔 페이지) |
-| `scripts/` | 준비·빌드·플래싱·접속 스크립트. 공용 유틸(기기 주소, 파티션 테이블, 플래싱 헬퍼, usage 출력)은 `lib.sh`. 무인 UI 테스트용 `tf-tap.sh`(탭), `tf-drag.sh`(드래그) |
+| `src/os/` | 커널 설정·디바이스 트리·드라이버, initramfs, rootfs 설정, Alpine 패키지 목록 및 락파일 |
+| `src/app/` | 스트림덱 앱. `tossd/` 데몬(Rust), `ui/` 화면(QML: `shell/` 뼈대, `kit/` 컴포넌트, `widgets/` 앱 위젯), `rootfs/` 기기 배치 파일, `proto/` 덱-PC 프로토콜, `meter/` 리소스 측정(덱/PC 공용), `host/` PC 측 프로그램 `toss-connector`(`console/`은 웹 콘솔 페이지) |
+| `src/scripts/` | 준비·빌드·플래싱·접속 스크립트. 공용 유틸(기기 주소, 파티션 테이블, 플래싱 헬퍼, usage 출력)은 `lib.sh`. 무인 UI 테스트용 `tf-tap.sh`(탭), `tf-drag.sh`(드래그) |
 | `docs/` | 문서 디렉터리 |
+| `dist/` | 빌드 산출물(git 제외): 이미지(`images`, `userdata.img`), 커널 증분 빌드, `cargo` 출력(`cargo/`) |
+| `local/` | 로컬 자료(git 제외): 기기 백업, 순정 이미지, Alpine 패키지 아카이브, 기기 고유 설정, 로더, 조사 자료 |
 
-git에 포함되지 않아 **별도로 백업해야 하는 디렉터리**: `backup/`(초기 기기 덤프), `downgrade/`(순정 761 이미지), `archive/`(고정된 Alpine 패키지 파일), `device/`(기기 고유 설정).
+git에 포함되지 않아 **별도로 백업해야 하는 디렉터리**: `local/backup/`(초기 기기 덤프), `local/downgrade/`(순정 761 이미지), `local/archive/`(고정된 Alpine 패키지 파일), `local/device/`(기기 고유 설정).

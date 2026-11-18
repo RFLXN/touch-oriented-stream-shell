@@ -1,6 +1,6 @@
 # initramfs 이미지를 빌드한다. `nix/build.nix`의 `initramfs`가 fakeroot 환경에서 실행한다.
 # 입력(환경 변수): `src`, `busyboxApk`, `regdbApk`, `firmware`, `out`
-# 포함 내용: 정적 busybox, `os/initramfs/init`, 무선 펌웨어, 무선 규제 DB(`regulatory.db` 및 서명 파일 — 누락 시 빌드 실패).
+# 포함 내용: 정적 busybox, `src/os/initramfs/init`, 무선 펌웨어, 무선 규제 DB(`regulatory.db` 및 서명 파일 — 누락 시 빌드 실패).
 set -euo pipefail
 
 r=$PWD/initramfs
@@ -8,7 +8,7 @@ mkdir -p "$r/bin" "$r/dev" "$r/lib/firmware" pkg
 
 tar xzf "$busyboxApk" -C pkg --wildcards '*busybox.static' 2>/dev/null
 install -m 755 "$(find pkg -name busybox.static)" "$r/bin/busybox"
-install -m 755 "$src/os/initramfs/init" "$r/init"
+install -m 755 "$src/src/os/initramfs/init" "$r/init"
 
 cp -r "$firmware/." "$r/lib/firmware/"
 tar xzf "$regdbApk" -C pkg --wildcards '*regulatory.db*' 2>/dev/null

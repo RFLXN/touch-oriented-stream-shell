@@ -7,16 +7,16 @@
 ## 3.1 큰 그림
 
 ```
-개발 PC (NixOS)                         토스 프론트
-┌──────────────────────┐   Micro USB   ┌──────────────────────────────┐
-│ nix develop           │──────────────│ Alpine Linux 3.24 (musl)      │
-│  scripts/deploy.sh    │  플래싱       │  dropbear (SSH)               │
-│  scripts/tf-ssh.sh    │  USB 이더넷   │  tossd (데몬, Rust)           │
-│  scripts/app-push.sh  │  172.16.42.x │    ↕ WebSocket                │
-│  scripts/console.py   │  USB 시리얼   │  cage → toss-shell (화면, QML)   │
-└──────────────────────┘              │  800×1280 터치 화면           │
-          └────────── LAN (선택) ───────│  eth0 / wlan0                 │
-                                       └──────────────────────────────┘
+개발 PC (NixOS)                             토스 프론트
+┌──────────────────────────┐   Micro USB   ┌──────────────────────────────┐
+│ nix develop               │──────────────│ Alpine Linux 3.24 (musl)      │
+│  src/scripts/deploy.sh    │  플래싱       │  dropbear (SSH)               │
+│  src/scripts/tf-ssh.sh    │  USB 이더넷   │  tossd (데몬, Rust)           │
+│  src/scripts/app-push.sh  │  172.16.42.x │    ↕ WebSocket                │
+│  src/scripts/console.py   │  USB 시리얼   │  cage → toss-shell (화면, QML)   │
+└──────────────────────────┘              │  800×1280 터치 화면           │
+          └────────────── LAN (선택) ───────│  eth0 / wlan0                 │
+                                           └──────────────────────────────┘
 ```
 
 - 필수 연결은 하부 Micro USB 케이블 하나다. 이 케이블로 플래싱, SSH, 시리얼 콘솔, 파일 전송을 모두 처리한다.
@@ -58,7 +58,7 @@ USB 이더넷은 별도 설정이 필요 없다. 기기가 DHCP로 PC에 `172.16
 ### 연결 확인
 
 ```bash
-nix develop -c scripts/tf-ssh.sh 'uname -a'
+nix develop -c src/scripts/tf-ssh.sh 'uname -a'
 ```
 
 `Linux toss-front 6.18.63-tossfront …`가 출력되면 정상이다.
@@ -67,19 +67,19 @@ nix develop -c scripts/tf-ssh.sh 'uname -a'
 
 | 작업 | 명령 | 상태 |
 |---|---|---|
-| 셸 열기 | `scripts/tf-ssh.sh` | 확인됨 |
-| 명령 하나 실행 | `scripts/tf-ssh.sh 'ls /dev/input'` | 확인됨 |
-| 파일 보내기 | `scripts/tf-ssh.sh --put ./app /root/app` | 확인됨 |
-| 파일 받기 | `scripts/tf-ssh.sh --get /root/log.txt ./log.txt` | 확인됨 |
-| 재부팅 | `scripts/tf-ssh.sh --reboot` (뒤에 모드 지정 가능: `normal` 기본, `loader` 플래싱용 Loader로, `recovery` 복귀용 순정 커널로 1회) | 확인됨 |
-| 화면 한 지점에 터치 이벤트 주입 | `scripts/tf-tap.sh 750 53` (좌표는 화면 픽셀. 여러 지점을 이어서 지정 가능) | 확인됨 |
-| 시리얼 콘솔로 명령 실행 | `scripts/console.py 'dmesg \| tail'` | 확인됨 |
+| 셸 열기 | `src/scripts/tf-ssh.sh` | 확인됨 |
+| 명령 하나 실행 | `src/scripts/tf-ssh.sh 'ls /dev/input'` | 확인됨 |
+| 파일 보내기 | `src/scripts/tf-ssh.sh --put ./app /root/app` | 확인됨 |
+| 파일 받기 | `src/scripts/tf-ssh.sh --get /root/log.txt ./log.txt` | 확인됨 |
+| 재부팅 | `src/scripts/tf-ssh.sh --reboot` (뒤에 모드 지정 가능: `normal` 기본, `loader` 플래싱용 Loader로, `recovery` 복귀용 순정 커널로 1회) | 확인됨 |
+| 화면 한 지점에 터치 이벤트 주입 | `src/scripts/tf-tap.sh 750 53` (좌표는 화면 픽셀. 여러 지점을 이어서 지정 가능) | 확인됨 |
+| 시리얼 콘솔로 명령 실행 | `src/scripts/console.py 'dmesg \| tail'` | 확인됨 |
 | 시리얼 콘솔 대화형 | `picocom /dev/ttyACM0` | 미검증 |
 
 - 로그인 계정은 `root`, 비밀번호 없음. SSH는 USB 이더넷 IP뿐 아니라 유선·무선 IP에서도 수신한다(이 기기의 현재 설정. 3.15절 보안 주의 참고).
-- **SSH는 덱 설정에서 끌 수 있다**(설정 → `NETWORK` → `SSH`). 꺼져 있으면 `tf-ssh.sh`와 이를 쓰는 스크립트(`app-push.sh`, `tf-tap.sh`, `deploy.sh`의 Loader 진입 단계)가 모두 동작하지 않는다. `Connection refused`가 나오면 덱 화면에서 다시 켠다. 꺼 둔 상태에서도 시리얼 콘솔(`scripts/console.py`)은 동작한다.
-- LAN IP로 접속하려면 `TF_HOST=<기기 주소> scripts/tf-ssh.sh …`. 기기에 접속하는 다른 스크립트(`tf-net.sh`, `tf-tap.sh`, `tf-drag.sh`, `app-push.sh`, `deploy.sh`의 Loader 진입 단계)도 같은 변수를 따른다 — IP와 SSH 옵션을 한 곳(`scripts/lib.sh`)에서 가져다 쓴다. IP는 기기에서 `ip -4 addr show eth0`으로 확인한다. DHCP 할당이라 바뀔 수 있으므로, 고정하려면 공유기에서 MAC 주소에 IP를 예약한다.
-- 스크립트에 잘못된 인자를 주면(예: `scripts/tf-ssh.sh --put` 뒤에 경로가 하나뿐일 때, `scripts/tf-tap.sh`에 좌표가 홀수 개일 때) 사용법을 출력하고 종료한다. 사용법은 각 스크립트 상단 주석 그대로다.
+- **SSH는 덱 설정에서 끌 수 있다**(설정 → `NETWORK` → `SSH`). 꺼져 있으면 `tf-ssh.sh`와 이를 쓰는 스크립트(`app-push.sh`, `tf-tap.sh`, `deploy.sh`의 Loader 진입 단계)가 모두 동작하지 않는다. `Connection refused`가 나오면 덱 화면에서 다시 켠다. 꺼 둔 상태에서도 시리얼 콘솔(`src/scripts/console.py`)은 동작한다.
+- LAN IP로 접속하려면 `TF_HOST=<기기 주소> src/scripts/tf-ssh.sh …`. 기기에 접속하는 다른 스크립트(`tf-net.sh`, `tf-tap.sh`, `tf-drag.sh`, `app-push.sh`, `deploy.sh`의 Loader 진입 단계)도 같은 변수를 따른다 — IP와 SSH 옵션을 한 곳(`src/scripts/lib.sh`)에서 가져다 쓴다. IP는 기기에서 `ip -4 addr show eth0`으로 확인한다. DHCP 할당이라 바뀔 수 있으므로, 고정하려면 공유기에서 MAC 주소에 IP를 예약한다.
+- 스크립트에 잘못된 인자를 주면(예: `src/scripts/tf-ssh.sh --put` 뒤에 경로가 하나뿐일 때, `src/scripts/tf-tap.sh`에 좌표가 홀수 개일 때) 사용법을 출력하고 종료한다. 사용법은 각 스크립트 상단 주석 그대로다.
 - 기기를 재플래싱하면 SSH 호스트 키가 바뀐다. 그래서 `tf-ssh.sh`는 호스트 키를 기록하지 않는다.
 - **시리얼 콘솔은 네트워크가 안 될 때의 비상 통로다.** 네트워크 설정이 망가져도 접속할 수 있고, `console.py --put`으로 파일도 전송할 수 있다.
 
@@ -98,18 +98,18 @@ Host tossfront
 
 ## 3.4 패키지 설치하기
 
-**기기에 직접 설치한 패키지는 임시 테스트용이다.** `userdata`를 다시 구우면 사라진다. 계속 쓸 패키지는 `os/alpine/packages`에 추가해 이미지에 넣는다(3.6절).
+**기기에 직접 설치한 패키지는 임시 테스트용이다.** `userdata`를 다시 구우면 사라진다. 계속 쓸 패키지는 `src/os/alpine/packages`에 추가해 이미지에 넣는다(3.6절).
 
 LAN 케이블이 꽂혀 있으면 기기에서 바로 `apk add …`가 된다(확인됨). 기기에 인터넷이 연결돼 있지 않을 때는 PC 인터넷을 공유해 쓴다(확인됨).
 
 ```bash
-nix develop -c scripts/tf-net.sh apk add htop
+nix develop -c src/scripts/tf-net.sh apk add htop
 ```
 
 `tf-net.sh`는 뒤에 넘긴 명령을 기기에서 실행하는 동안만 PC를 거쳐 인터넷이 되도록 연결한다. `apk`뿐 아니라 `wget`, `git`, `pip` 등 프록시 환경 변수를 따르는 도구라면 모두 동작한다. 기본은 USB IP로 접속하며 `TF_HOST=<기기 IP>`를 주면 LAN으로 접속한다(`tf-ssh.sh`와 동일).
 
 ```bash
-nix develop -c scripts/tf-net.sh 'apk update && apk upgrade'
+nix develop -c src/scripts/tf-net.sh 'apk update && apk upgrade'
 ```
 
 - PC에 root 권한이나 방화벽 설정이 필요 없다. PC에서 프록시를 localhost에만 띄우고 SSH 터널로 기기에 연결해 준다.
@@ -177,17 +177,17 @@ nix develop -c scripts/tf-net.sh 'apk update && apk upgrade'
 
 ### 커널 옵션 추가
 
-필요한 커널 기능이 빠졌으면 `os/kernel/toss-front.config`에 한 줄 추가하고 다시 올린다.
+필요한 커널 기능이 빠졌으면 `src/os/kernel/toss-front.config`에 한 줄 추가하고 다시 올린다.
 
 ```bash
-nix develop -c scripts/deploy.sh
+nix develop -c src/scripts/deploy.sh
 ```
 
 커널 전체를 다시 빌드하므로 몇 분 걸린다(16코어 PC 기준 약 3분). 케이블이나 버튼을 만질 필요는 없다. 커널 설정이 바뀌면 루트 이미지도 다시 만들어지므로(내장 모듈 목록 포함) 셋 다 올리는 편이 맞고, 이때 기기에서 직접 수정한 내용은 초기화된다.
 
 - 설정 조각 파일에 넣은 값이 최종 `.config`에 반영되지 않으면 빌드가 실패한다. 의존 옵션이 꺼져 있다는 뜻이다.
-- 커널 부팅 인자는 `os/kernel/cmdline`, 디바이스 트리는 `os/kernel/dts/`에 있다. 이 둘만 수정했다면 `scripts/deploy.sh boot`로 충분하며 금방 끝난다.
-- 여러 번 고쳐 가며 테스트할 때는 증분 빌드(`scripts/build-kernel.sh`, `scripts/build-boot.sh`)를 쓴다. 절차는 [02-progress.md](02-progress.md) 2.11절 참고(이 방식으로 디스플레이와 터치를 붙였다).
+- 커널 부팅 인자는 `src/os/kernel/cmdline`, 디바이스 트리는 `src/os/kernel/dts/`에 있다. 이 둘만 수정했다면 `src/scripts/deploy.sh boot`로 충분하며 금방 끝난다.
+- 여러 번 고쳐 가며 테스트할 때는 증분 빌드(`src/scripts/build-kernel.sh`, `src/scripts/build-boot.sh`)를 쓴다. 절차는 [02-progress.md](02-progress.md) 2.11절 참고(이 방식으로 디스플레이와 터치를 붙였다).
 
 ## 3.6 변경 사항 영속화
 
@@ -195,7 +195,7 @@ nix develop -c scripts/deploy.sh
 
 | | 기기에서 직접 | 저장소에 반영 |
 |---|---|---|
-| 방법 | SSH로 접속해 설치·수정 | 아래 표의 파일 수정 후 `scripts/deploy.sh` |
+| 방법 | SSH로 접속해 설치·수정 | 아래 표의 파일 수정 후 `src/scripts/deploy.sh` |
 | 속도 | 즉시 | 이미지를 다시 빌드해 플래싱해야 함 (1~2분) |
 | 지속성 | `userdata` 재플래싱 시 **전부 초기화** | 저장소에 남아 언제든 동일 상태로 재현 가능 |
 | 목적 | 실험, 시행착오 | 확정된 구성 |
@@ -204,19 +204,19 @@ nix develop -c scripts/deploy.sh
 
 | 반영 대상 | 수정 위치 |
 |---|---|
-| 패키지 | `os/alpine/packages`에 한 줄 추가 → `scripts/alpine-lock.sh update` (버전·해시 고정 및 아카이브 저장) |
-| 설정 파일, 스크립트, 서비스 | `os/rootfs/` 아래 동일 경로. 예: `os/rootfs/etc/local.d/10-usb-net.start` |
-| 스트림덱 앱 | `app/` (3.16절, 3.17절). 데몬은 Nix로 빌드해 넣고, QML 파일은 그대로 포함 |
+| 패키지 | `src/os/alpine/packages`에 한 줄 추가 → `src/scripts/alpine-lock.sh update` (버전·해시 고정 및 아카이브 저장) |
+| 설정 파일, 스크립트, 서비스 | `src/os/rootfs/` 아래 동일 경로. 예: `src/os/rootfs/etc/local.d/10-usb-net.start` |
+| 스트림덱 앱 | `src/app/` (3.16절, 3.17절). 데몬은 Nix로 빌드해 넣고, QML 파일은 그대로 포함 |
 | 기타 직접 개발한 바이너리 | Nix로 빌드해 이미지에 포함. 데몬(`nix/build.nix`의 `tossd`)이 레퍼런스 |
 | 활성화할 서비스 | `nix/build-rootfs.sh`의 `enable` 항목 |
 | 호스트명, SSH 수신 대역·공개키, 시계 동기화·시간대, 키오스크 앱, 스트림덱 앱 포함 여부 | `flake.nix`의 `buildImage { … }` 인자 ([02-progress.md](02-progress.md) 2.6절 옵션 표 참고) |
-| 기기 고유 값 (MAC 주소, SSH 호스트 키) | `device/rootfs/` 아래 동일 경로. git 비추적이므로 별도 백업 필수 |
+| 기기 고유 값 (MAC 주소, SSH 호스트 키) | `local/device/rootfs/` 아래 동일 경로. git 비추적이므로 별도 백업 필수 |
 | 사용자가 기기에서 설정한 값 (Wi-Fi 정보 등) | 저장소에 적지 않는다. 기기 `/data`에만 저장되며 재플래싱 후에도 유지됨 (3.15절 "기기에만 남는 데이터") |
 
-- 반영 명령: `scripts/deploy.sh` (빌드 → Loader 진입 → 기록·검증 → 재부팅). `userdata`만 갱신할 때는 `scripts/deploy.sh userdata`.
+- 반영 명령: `src/scripts/deploy.sh` (빌드 → Loader 진입 → 기록·검증 → 재부팅). `userdata`만 갱신할 때는 `src/scripts/deploy.sh userdata`.
 - 동일 커밋에서는 바이트 단위로 똑같은 이미지가 나온다. 재현성 고정 요소는 [02-progress.md](02-progress.md) 2.6절을 참고하면 된다.
 - 패키지를 추가할 때 설치 스크립트가 포함돼 있다면 이미지 빌드에서는 실행되지 않는다(같은 문서 2.6절 "빌드가 생략하는 작업"). 기기에서 `apk add`로 넣었을 때와 동작이 다르다면 이 부분을 의심해 봐야 한다.
-- 재플래싱 시 사라지는 파일 중 백업할 것이 있으면 먼저 내려받는다: `scripts/tf-ssh.sh 'tar czf - /root /etc' > device-backup.tar.gz`. 이 아카이브에는 SSH 호스트 키 같은 기기 고유 값이 포함되므로 `*.tar.gz`는 `.gitignore`에 들어 있다(터치 덤프 같은 `*.bin`도 동일).
+- 재플래싱 시 사라지는 파일 중 백업할 것이 있으면 먼저 내려받는다: `src/scripts/tf-ssh.sh 'tar czf - /root /etc' > device-backup.tar.gz`. 이 아카이브에는 SSH 호스트 키 같은 기기 고유 값이 포함되므로 `*.tar.gz`는 `.gitignore`에 들어 있다(터치 덤프 같은 `*.bin`도 동일).
 
 주의: `recovery` 슬롯의 순정 커널도 같은 루트 파일시스템을 마운트한다. 순정 커널에는 화면 콘솔과 GPU 드라이버가 없으므로, 화면에 의존하는 서비스는 순정 커널 부팅 시 동작하지 않도록 가드를 두었다(화면 앱은 뜨지 않고 대기). 새로 추가하는 서비스가 화면에 의존한다면 동일하게 분기 처리해야 한다.
 
@@ -259,22 +259,22 @@ GPU 가속(OpenGL ES 3.1) 사용 가능.
 | `/usr/sbin/tf-kiosk` | 위 구성을 묶어 띄우는 래퍼 스크립트. inittab이 호출 |
 | `kiosk` 사용자 | 앱 실행 계정 (`seat`, `video` 그룹, 홈 `/home/kiosk`) |
 
-**실행 앱 변경**: `flake.nix`의 `kiosk.command`를 수정하고 `scripts/deploy.sh userdata`. 현재는 스트림덱 UI(`toss-shell`)다. 터미널을 띄우려면 `"foot"`, 콘솔 로그인으로 되돌리려면 `kiosk.enable = false`.
+**실행 앱 변경**: `flake.nix`의 `kiosk.command`를 수정하고 `src/scripts/deploy.sh userdata`. 현재는 스트림덱 UI(`toss-shell`)다. 터미널을 띄우려면 `"foot"`, 콘솔 로그인으로 되돌리려면 `kiosk.enable = false`.
 
 **플래싱 전 테스트**: 실행 중인 앱을 내리고 다른 앱을 띄워 볼 수 있다. `tf-kiosk`가 종료되면 inittab이 원래 앱을 다시 띄우므로 테스트 중에는 커맨드 파일을 임시로 덮어쓴다(재플래싱 시 원래대로 복구됨).
 
 ```bash
-scripts/tf-ssh.sh 'echo "<테스트할 명령>" > /etc/tossfront/kiosk.command && killall cage'
+src/scripts/tf-ssh.sh 'echo "<테스트할 명령>" > /etc/tossfront/kiosk.command && killall cage'
 ```
 
 **화면 캡처** (확인됨): 현재 화면을 원격으로 캡처한다.
 
 ```bash
-scripts/tf-ssh.sh "su -s /bin/sh kiosk -c 'XDG_RUNTIME_DIR=/run/user/\$(id -u) WAYLAND_DISPLAY=wayland-0 grim /tmp/shot.png'"
+src/scripts/tf-ssh.sh "su -s /bin/sh kiosk -c 'XDG_RUNTIME_DIR=/run/user/\$(id -u) WAYLAND_DISPLAY=wayland-0 grim /tmp/shot.png'"
 ```
 
 ```bash
-scripts/tf-ssh.sh --get /tmp/shot.png shot.png
+src/scripts/tf-ssh.sh --get /tmp/shot.png shot.png
 ```
 
 참고 사항:
@@ -306,13 +306,13 @@ Qt Quick과 Slint를 실기기에서 같은 화면 구성으로 비교 측정했
 터치를 확인하는 가장 빠른 방법(확인됨: `evtest`가 기기에 설치돼 있음):
 
 ```bash
-nix develop -c scripts/tf-ssh.sh 'evtest /dev/input/event0'
+nix develop -c src/scripts/tf-ssh.sh 'evtest /dev/input/event0'
 ```
 
 - 좌표 범위는 두 축 모두 0~16383이다. 화면 픽셀로 변환하려면 `x * 800 / 16384`, `y * 1280 / 16384`. libinput이나 SDL을 쓰면 자동으로 변환해 준다.
 - 디스플레이 방향과 일치하도록 디바이스 트리에서 회전 보정을 적용해 두었다. 좌상단이 (0, 0)이다.
 - 멀티터치 프로토콜 B(슬롯 기반)로 동작한다.
-- 덤프해 두고 PC에서 분석하려면: 기기에서 `cat /dev/input/event0 > touch.bin`, PC에서 `scripts/parse-touch.py touch.bin`
+- 덤프해 두고 PC에서 분석하려면: 기기에서 `cat /dev/input/event0 > touch.bin`, PC에서 `src/scripts/parse-touch.py touch.bin`
 
 ## 3.9 PC 연동 구조 (스트림덱 핵심)
 
@@ -332,7 +332,7 @@ PC에 별도 프로그램을 깔지 않고 덱이 USB 키보드로 인식되게 
 | Rust | 타깃 `aarch64-unknown-linux-musl`. 정적 바이너리로 바로 동작. devshell에 툴체인 포함(3.16절) | 확인됨: 데몬 `tossd`가 이 방식 |
 | Nix 크로스 컴파일 | `pkgsCross.aarch64-multiplatform-musl.pkgsStatic.<패키지>`로 정적 바이너리 빌드. 동적 링크 산출물은 `/nix/store` 경로를 참조해 Alpine에서 그대로 돌지 않음 | 미검증 |
 | nixpkgs aarch64 패키지 통째 복사 | 바이너리 캐시의 aarch64 빌드를 의존성과 함께 기기 `/nix/store`에 복사하면 동작(glibc 포함). 용량이 커서 테스트용 | 확인됨 (UI 프레임워크 비교 시 사용) |
-| libc 없는 소형 C 바이너리 | `os/tools/`의 `reboot-mode`, `i2c-read`가 이 방식. `clang --target=aarch64-unknown-linux-gnu -static -nostdlib -ffreestanding` | 확인됨 |
+| libc 없는 소형 C 바이너리 | `src/os/tools/`의 `reboot-mode`, `i2c-read`가 이 방식. `clang --target=aarch64-unknown-linux-gnu -static -nostdlib -ffreestanding` | 확인됨 |
 
 **이미지에 포함할 바이너리는 PC에서 Nix로 빌드한다.** 기기에서 직접 빌드한 결과물은 재플래싱 시 사라지고 재현도 되지 않는다. 기기 라이브러리에 의존하지 않는 정적 바이너리(Rust, Go, nostdlib C)가 다루기 편하다. Alpine 패키지의 라이브러리(Qt 등)에 동적 링크해야 하는 프로그램은 기기 버전에 맞춰 크로스 컴파일해야 해 번거롭다. 스트림덱 UI를 QML로만 구성한 이유도 이 때문이다.
 
@@ -342,7 +342,7 @@ Alpine은 OpenRC를 사용한다.
 
 **간단한 방법**: `/etc/local.d/`에 `.start` 확장자로 실행 스크립트를 둔다. 부팅 마지막 단계에 1회 실행된다(확인됨: USB 이더넷 DHCP가 이 방식).
 
-**서비스 등록** (확인됨: 스트림덱 데몬이 이 방식): `app/rootfs/etc/init.d/tossd`
+**서비스 등록** (확인됨: 스트림덱 데몬이 이 방식): `src/app/rootfs/etc/init.d/tossd`
 
 ```sh
 #!/sbin/openrc-run
@@ -389,52 +389,52 @@ nix develop
 devshell 안에서:
 
 ```bash
-scripts/app-push.sh ui
+src/scripts/app-push.sh ui
 ```
 
 ```bash
-scripts/app-push.sh tossd
+src/scripts/app-push.sh tossd
 ```
 
-앞 명령은 QML 파일을 올리고 UI를 재시작한다(수 초). 뒤 명령은 데몬을 기기용으로 크로스 빌드해 교체하고 서비스를 재시작한다. 수정이 끝나면 `scripts/deploy.sh userdata`로 이미지에 구워 확정한다.
+앞 명령은 QML 파일을 올리고 UI를 재시작한다(수 초). 뒤 명령은 데몬을 기기용으로 크로스 빌드해 교체하고 서비스를 재시작한다. 수정이 끝나면 `src/scripts/deploy.sh userdata`로 이미지에 구워 확정한다.
 
 다른 바이너리를 잠깐 올려 테스트할 때:
 
 ```bash
-scripts/tf-ssh.sh --put ./myapp /root/myapp
+src/scripts/tf-ssh.sh --put ./myapp /root/myapp
 ```
 
 ```bash
-scripts/tf-ssh.sh '/root/myapp'
+src/scripts/tf-ssh.sh '/root/myapp'
 ```
 
 - 화면 캡처: 3.7절 C
-- 데몬 로그: `scripts/tf-ssh.sh 'tail -n 30 /var/log/tossd.log'`
-- UI 로그(QML 에러 포함): `scripts/tf-ssh.sh 'grep -v "^00:" /var/log/kiosk.log'`
-- 시스템 로그: `scripts/tf-ssh.sh 'tail -n 50 /var/log/messages'`, 커널 로그는 `dmesg`
-- 화면 밝기: `scripts/tf-ssh.sh 'echo 120 > /sys/class/backlight/backlight/brightness'` (0~255)
+- 데몬 로그: `src/scripts/tf-ssh.sh 'tail -n 30 /var/log/tossd.log'`
+- UI 로그(QML 에러 포함): `src/scripts/tf-ssh.sh 'grep -v "^00:" /var/log/kiosk.log'`
+- 시스템 로그: `src/scripts/tf-ssh.sh 'tail -n 50 /var/log/messages'`, 커널 로그는 `dmesg`
+- 화면 밝기: `src/scripts/tf-ssh.sh 'echo 120 > /sys/class/backlight/backlight/brightness'` (0~255)
 
 ## 3.13 트러블슈팅
 
 | 증상 | 확인 및 조치 |
 |---|---|
-| SSH 접속 불가 | 덱 설정에서 SSH가 꺼져 있는지 확인(설정 → `SSH`). 아니면 `scripts/console.py 'ip addr; rc-status'`로 시리얼 콘솔에서 확인 |
+| SSH 접속 불가 | 덱 설정에서 SSH가 꺼져 있는지 확인(설정 → `SSH`). 아니면 `src/scripts/console.py 'ip addr; rc-status'`로 시리얼 콘솔에서 확인 |
 | PC에 USB 장치 미인식 | 케이블(데이터 케이블 여부) 및 기기 전원 확인. `lsusb`에 `1d6b:0104`가 잡혀야 함 |
 | `/dev/ttyACM0` 권한 에러 | 3.2절의 udev 규칙 확인 (PC 재부팅 후 사라졌을 가능성) |
 | `apk` 인증서 에러 | 시스템 시각 문제(`date`로 확인). 전원을 뽑았다 켠 뒤 오프라인으로 부팅하면 2013년으로 초기화된다. 네트워크가 연결되면 자동 동기화되고, 아니면 `tf-net.sh`로 실행하면 PC 시각으로 맞춰 줌 |
 | 루트 파일시스템 손상으로 부팅 실패 | initramfs가 USB 시리얼에 복구 셸을 띄운다. `console.py`로 들어가 복구하거나 `userdata` 재플래싱 |
-| 커널 변경 후 부팅 실패 | 전원을 뽑았다가 초기화 버튼(하부 위쪽 버튼)을 누른 채 꽂으면 Loader 모드. `scripts/flash.sh --enter` 후 직전 정상 이미지를 `boot`에 다시 기록 (`scripts/flash.sh boot <이미지>`) |
-| `flash.sh`(또는 `backup.sh`, `downgrade.sh`)에서 `[FAIL] MaskROM + 로더 적재 상태가 아닙니다` | 읽기와 쓰기는 로더를 올린 상태에서만 동작한다. `scripts/flash.sh --enter` 먼저 실행. 거기서 `[FAIL] 로더 파일이 없습니다`가 뜨면 `scripts/fetch-loader.sh`, `[FAIL] 기기에 명령을 보낼 수 없습니다`가 뜨면 3.2절 udev 규칙 확인 |
-| `flash.sh`에서 `[FAIL] … 기록 실패` 또는 `되읽기 불일치` | 케이블과 전원을 점검하고 `scripts/flash.sh --enter`부터 재시도. 실패한 파티션은 불완전하게 쓰였을 수 있으므로 같은 이미지를 다시 기록. 도구 출력 말미가 `[FAIL]` 줄 위에 함께 출력됨 |
+| 커널 변경 후 부팅 실패 | 전원을 뽑았다가 초기화 버튼(하부 위쪽 버튼)을 누른 채 꽂으면 Loader 모드. `src/scripts/flash.sh --enter` 후 직전 정상 이미지를 `boot`에 다시 기록 (`src/scripts/flash.sh boot <이미지>`) |
+| `flash.sh`(또는 `backup.sh`, `downgrade.sh`)에서 `[FAIL] MaskROM + 로더 적재 상태가 아닙니다` | 읽기와 쓰기는 로더를 올린 상태에서만 동작한다. `src/scripts/flash.sh --enter` 먼저 실행. 거기서 `[FAIL] 로더 파일이 없습니다`가 뜨면 `src/scripts/fetch-loader.sh`, `[FAIL] 기기에 명령을 보낼 수 없습니다`가 뜨면 3.2절 udev 규칙 확인 |
+| `flash.sh`에서 `[FAIL] … 기록 실패` 또는 `되읽기 불일치` | 케이블과 전원을 점검하고 `src/scripts/flash.sh --enter`부터 재시도. 실패한 파티션은 불완전하게 쓰였을 수 있으므로 같은 이미지를 다시 기록. 도구 출력 말미가 `[FAIL]` 줄 위에 함께 출력됨 |
 | 위 방법으로도 진입 불가 | `BOOT`–`VCC_1V8` 패드 쇼트로 MaskROM 진입 ([01-findings.md](01-findings.md) 1.2절) |
-| 순정 커널로 임시 부팅 필요 | `scripts/tf-ssh.sh --reboot recovery` (1회성. 다음 재부팅 시 메인라인 복귀) |
+| 순정 커널로 임시 부팅 필요 | `src/scripts/tf-ssh.sh --reboot recovery` (1회성. 다음 재부팅 시 메인라인 복귀) |
 | 직전 부팅 크래시 원인 확인 | 재부팅 후 `/sys/fs/pstore/`에 직전 커널 로그가 남는다. 전원을 차단하면 소실됨 |
 | 부팅 후 연결한 Micro USB 미인식 | 기기가 켜진 상태에서 꽂으면 잡히지 않는 경우가 있었다. 기기를 재부팅한다. 상단바 USB 아이콘(삼지창 모양)이 초록색이면 정상 연결됨 |
 | 화면에 앱이 안 뜨거나 재시작 반복 | `/var/log/kiosk.log` 및 `kiosk.log.1` 확인. `00:`로 시작하는 줄은 컴포지터 로그, 나머지가 앱 출력 |
 | 화면이 흐려지고 `NO LINK TO TOSSD` 표시 (상단바 칩 아이콘 주황색 점멸) | 데몬 미실행 상태. `rc-service tossd status`, `/var/log/tossd.log`, `/var/log/messages`의 `supervise-daemon` 로그 확인 |
 | 명령 위젯을 눌러도 PC에서 무반응 | 위젯이 비활성화(흐림) 상태면 해당 PC가 미연결이거나 그 명령을 제공하지 않는 상태다. 활성화 상태인데 동작하지 않으면 데몬 로그의 `host:` 줄 확인(`대상 호스트가 연결되어 있지 않음`, `액션 … 실패`). PC 측 거절 사유는 PC 로그에 남는다([04-host-link.md](04-host-link.md) 4.5절) |
 | 화면 글자가 두부(□)로 깨짐 | 폰트 패키지 `font-noto-cjk`가 이미지에 포함됐는지 확인 (`fc-list \| grep -c CJK`) |
-| 기기 상태가 저장소와 불일치 | `scripts/deploy.sh`로 재플래싱. 기기에서 직접 수정한 내용은 초기화되고 저장소 기준으로 복구됨 |
+| 기기 상태가 저장소와 불일치 | `src/scripts/deploy.sh`로 재플래싱. 기기에서 직접 수정한 내용은 초기화되고 저장소 기준으로 복구됨 |
 
 화면이 까맣고 백라이트만 켜져 있으면 커널 로그에서 "패널 전원 상태" 경고를 찾아본다. 점검 순서는 [01-findings.md](01-findings.md) 1.3절 "화면"에 있다.
 
@@ -469,7 +469,7 @@ scripts/tf-ssh.sh '/root/myapp'
 주변 AP 스캔 (확인됨):
 
 ```bash
-nix develop -c scripts/tf-ssh.sh 'ip link set wlan0 up && iw dev wlan0 scan | grep SSID'
+nix develop -c src/scripts/tf-ssh.sh 'ip link set wlan0 up && iw dev wlan0 scan | grep SSID'
 ```
 
 AP 접속: **기기 UI에서 설정한다.** 상단바 설정 버튼 → `Wi-Fi` → AP 선택 → 온스크린 키보드로 비밀번호 입력 후 `CONNECT`.
@@ -491,7 +491,7 @@ AP 접속: **기기 UI에서 설정한다.** 상단바 설정 버튼 → `Wi-Fi`
 | 150MHz | 커널 로그에 `brcmf_sdio_bus_sleep: error while changing bus sleep state -84`, `failed backplane access over SDIO, halting operation`. 부팅 직후에도 발생했고, 0.2초 간격 쿼리 시 350회 안에 터짐 |
 | 50MHz | 동일 테스트에서 재현 안 됨 (런타임 클럭 하향 5500회, DTS 고정 후 재플래싱 뒤 3000회) |
 
-이에 따라 DTS의 `sdio0` 클럭을 50MHz로 고정했다(`os/kernel/dts/rk3399-toss-front.dts`). 확인 명령: `scripts/tf-ssh.sh 'grep clock /sys/kernel/debug/mmc1/ios; dmesg | grep -c "bus sleep state"'` → `50000000 Hz`, `0`.
+이에 따라 DTS의 `sdio0` 클럭을 50MHz로 고정했다(`src/os/kernel/dts/rk3399-toss-front.dts`). 확인 명령: `src/scripts/tf-ssh.sh 'grep clock /sys/kernel/debug/mmc1/ios; dmesg | grep -c "bus sleep state"'` → `50000000 Hz`, `0`.
 
 - 이 버스 에러는 해결됐지만 **처음 발견된 5GHz 이슈는 별개 문제이며 아직 남아 있다**(아래 참고).
 
@@ -506,7 +506,7 @@ AP 접속: **기기 UI에서 설정한다.** 상단바 설정 버튼 → `Wi-Fi`
 | 역할 | 담당 |
 |---|---|
 | AP 스캔, 인증, 저장 | `wpa_supplicant`. 부팅 시 항상 실행된다(`/etc/local.d/30-wifi.start`). 저장된 AP와 비밀번호는 `/data/wifi/wpa_supplicant.conf`(권한 600, 디렉터리 700)에 기록된다. 이 경로는 `/etc/conf.d/wpa_supplicant`에서 지정한다 |
-| UI 요청을 `wpa_supplicant`에 전달 | 데몬 `tossd`(`app/tossd/src/wifi.rs`). 제어 소켓 `/run/wpa_supplicant/wlan0`에 명령을 보낸다. 소켓이 `tossd` 그룹에 열려 있어 데몬이 비루트여도 동작한다 |
+| UI 요청을 `wpa_supplicant`에 전달 | 데몬 `tossd`(`src/app/tossd/src/wifi.rs`). 제어 소켓 `/run/wpa_supplicant/wlan0`에 명령을 보낸다. 소켓이 `tossd` 그룹에 열려 있어 데몬이 비루트여도 동작한다 |
 | IP 할당 | `dhcpcd` |
 | UI | 설정 패널의 `WifiPage`, `WifiJoin` (3.16절) |
 
@@ -525,24 +525,24 @@ Wi-Fi가 연결되면 기기가 직접 인터넷에 나가므로 `tf-net.sh` 없
 - 비밀번호 설정: `passwd` (이후 `-B` 제거 가능)
 - 공개키 인증 전용: `/root/.ssh/authorized_keys`에 공개키 등록 후 `-B` 대신 `-s`
 
-설정 파일은 `/etc/conf.d/dropbear` 한 곳이다. `-p <주소>:22`가 있으면 해당 IP에서만, 없으면 모든 인터페이스에서 수신한다. 위 방법은 기기에서 즉시 적용하는 임시 조치이며 재플래싱 시 초기화된다. 영구 반영하려면 `flake.nix`의 `buildImage` 인자 중 `ssh.lan`과 `ssh.authorizedKeys`를 수정하고 `scripts/deploy.sh userdata`로 올린다.
+설정 파일은 `/etc/conf.d/dropbear` 한 곳이다. `-p <주소>:22`가 있으면 해당 IP에서만, 없으면 모든 인터페이스에서 수신한다. 위 방법은 기기에서 즉시 적용하는 임시 조치이며 재플래싱 시 초기화된다. 영구 반영하려면 `flake.nix`의 `buildImage` 인자 중 `ssh.lan`과 `ssh.authorizedKeys`를 수정하고 `src/scripts/deploy.sh userdata`로 올린다.
 
 ### 기기에만 남는 데이터 (`/data`)
 
-루트 파일시스템은 플래싱할 때마다 통째로 교체된다. 플래싱과 무관하게 기기에 남아야 하는 데이터(사용자가 기기에서 설정한 값)는 `/data`에 둔다. 이미지에도 PC의 `device/rootfs/`에도 들어가지 않는다(재현성 대상 아님).
+루트 파일시스템은 플래싱할 때마다 통째로 교체된다. 플래싱과 무관하게 기기에 남아야 하는 데이터(사용자가 기기에서 설정한 값)는 `/data`에 둔다. 이미지에도 PC의 `local/device/rootfs/`에도 들어가지 않는다(재현성 대상 아님).
 
 | 항목 | 내용 |
 |---|---|
 | 위치 | eMMC `cache` 파티션(384MB, 가용 공간 약 343MB). 순정 안드로이드가 쓰던 파티션이며 이 시스템은 덮어쓰지 않는다(`deploy.sh`는 `boot`, `recovery`, `userdata`만 기록) |
-| 마운트 | 서비스 `tf-data`(`os/rootfs/etc/init.d/tf-data`, `boot` 런레벨). 파티션을 이름으로 찾아 fsck 후 `/data`에 마운트하고, 앱 디렉터리 `/data/toss/`를 만들어 데몬 사용자 소유로 넘긴다. 데몬 서비스(`tossd`)는 이 서비스 이후에 시작된다 |
-| 파일시스템 | 기존 ext4를 **그대로** 사용한다(포맷하지 않음). 따라서 안드로이드가 남긴 디렉터리(`backup`, `customer`, `recovery` 등)가 함께 보인다. 건드리지 않으면 된다. 원본 내용은 `backup/cache.img`에 있다 |
+| 마운트 | 서비스 `tf-data`(`src/os/rootfs/etc/init.d/tf-data`, `boot` 런레벨). 파티션을 이름으로 찾아 fsck 후 `/data`에 마운트하고, 앱 디렉터리 `/data/toss/`를 만들어 데몬 사용자 소유로 넘긴다. 데몬 서비스(`tossd`)는 이 서비스 이후에 시작된다 |
+| 파일시스템 | 기존 ext4를 **그대로** 사용한다(포맷하지 않음). 따라서 안드로이드가 남긴 디렉터리(`backup`, `customer`, `recovery` 등)가 함께 보인다. 건드리지 않으면 된다. 원본 내용은 `local/backup/cache.img`에 있다 |
 | 현재 저장 데이터 | `/data/wifi/wpa_supplicant.conf`(저장된 Wi-Fi AP와 비밀번호), `/data/toss/`(화면 밝기와 SSH 활성 여부를 담은 `settings.json`, 덱 신원 키 `key`와 페어링 호스트 목록 `hosts.json` — [04-host-link.md](04-host-link.md) 4.9절 —, 그리고 사용자가 편집한 레이아웃 `layout.json` — 3.16절 "레이아웃 편집") |
 | 추후 추가 대상 | UI 표시 설정(테마, 글래스 효과) — 현재는 미저장 |
 
 - 파일시스템이 손상돼 마운트에 실패하면 서비스가 새로 포맷한다(기존 데이터 소실). 파티션 자체가 없거나 포맷 후에도 마운트에 실패하면 `/data`는 루트 위 디렉터리로 남으며, 이 경우 재플래싱 시 함께 초기화된다. 그 상태에서도 `/data/toss/`는 만들어지므로 앱은 다음 플래싱 전까지 정상적으로 읽고 쓴다.
-- 확인 명령: `scripts/tf-ssh.sh 'mountpoint /data && df -h /data'`
+- 확인 명령: `src/scripts/tf-ssh.sh 'mountpoint /data && df -h /data'`
 - **`/data/toss/`의 파일은 원자적으로 기록한다.** 같은 디렉터리의 임시 파일(`<이름>.new`)에 쓰고 fsync까지 마친 뒤 이름을 바꾼다. 쓰는 도중 전원이 끊겨도 이전 파일이나 새 파일 중 하나가 온전히 남는다.
-- **파싱할 수 없는 파일은 덮어쓰지 않고 백업한다.** 이름 뒤에 `.bad`를 붙여 치워 두고(`layout.json.bad`, `hosts.json.bad`, `settings.json.bad`, `key.bad`) 데몬 로그에 사유를 남긴 뒤, 해당 파일이 없는 것처럼 기본 상태로 기동한다(기본 레이아웃, 빈 페어링 목록, 새 키). 규칙에 어긋난 레이아웃도 동일하다. 구현은 `app/tossd/src/persist.rs`에 있다.
+- **파싱할 수 없는 파일은 덮어쓰지 않고 백업한다.** 이름 뒤에 `.bad`를 붙여 치워 두고(`layout.json.bad`, `hosts.json.bad`, `settings.json.bad`, `key.bad`) 데몬 로그에 사유를 남긴 뒤, 해당 파일이 없는 것처럼 기본 상태로 기동한다(기본 레이아웃, 빈 페어링 목록, 새 키). 규칙에 어긋난 레이아웃도 동일하다. 구현은 `src/app/tossd/src/persist.rs`에 있다.
 - 데몬은 시작 시 `/data/toss` 쓰기 가능 여부를 확인해 불가능하면 로그에 한 줄 남긴다(`…에 쓸 수 없습니다`). 이 경우 레이아웃, 페어링, 설정은 재부팅 시 유지되지 않는다.
 - 기기를 초기 상태로 되돌리려면(저장된 AP 전체 삭제) 기기에서 `/data/wifi` 디렉터리를 지우고 재부팅한다.
 - `/data` 내용은 PC에 백업되지 않는다. 기기를 분실하거나 `cache` 파티션을 덮어쓰면 소실된다.
@@ -552,7 +552,7 @@ Wi-Fi가 연결되면 기기가 직접 인터넷에 나가므로 `tf-net.sh` 없
 주변 기기 스캔 (확인됨). `bluetoothd` 없이 커널에 직접 질의하는 도구다.
 
 ```bash
-nix develop -c scripts/tf-ssh.sh 'btmgmt le on; btmgmt power on; timeout 15 btmgmt find'
+nix develop -c src/scripts/tf-ssh.sh 'btmgmt le on; btmgmt power on; timeout 15 btmgmt find'
 ```
 
 페어링과 프로파일(키보드, 오디오 등)을 쓰려면 `bluetoothd`와 D-Bus가 필요하다: `apk add dbus`, `rc-service dbus start`, `rc-service bluetooth start` 후 `bluetoothctl` (미검증).
@@ -564,20 +564,20 @@ nix develop -c scripts/tf-ssh.sh 'btmgmt le on; btmgmt power on; timeout 15 btmg
 - 할당된 IP 확인: `ip -4 addr show eth0`
 - 이더넷이 연결돼 있으면 기기가 직접 인터넷에 나가므로 `tf-net.sh` 없이 `apk add …`를 쓸 수 있다.
 - `dhcpcd`는 `eth0`과 `wlan0`만 관리한다(`/etc/dhcpcd.conf`의 `allowinterfaces`). USB 이더넷은 건드리지 않는다.
-- SSH는 LAN IP에서도 수신한다(확인됨: PC에서 기기 LAN IP로 접속). `TF_HOST=<기기 IP> scripts/tf-ssh.sh`. Wi-Fi 절의 보안 주의사항 참고.
+- SSH는 LAN IP에서도 수신한다(확인됨: PC에서 기기 LAN IP로 접속). `TF_HOST=<기기 IP> src/scripts/tf-ssh.sh`. Wi-Fi 절의 보안 주의사항 참고.
 MAC 주소는 `/etc/tossfront/eth0.mac`에 적힌 값으로 부팅 시 고정된다. 변경하려면 해당 파일을 수정하고 재부팅한다.
 
-## 3.16 스트림덱 앱 (`app/`)
+## 3.16 스트림덱 앱 (`src/app/`)
 
 화면에 뜨는 스트림덱 앱은 두 프로세스로 나뉜다. 로직과 시스템 제어는 전부 데몬에 두고, UI는 전달받은 상태를 렌더링만 한다. **이 앱 하나가 화면 전체를 전담한다**(상단바, 위젯, 설정, 온스크린 키보드). 별도로 도는 패널이나 런처는 없다.
 
 | 구성 요소 | 위치 | 기술 스택 | 기기 내 배치 |
 |---|---|---|---|
-| 데몬 `tossd` | `app/tossd/` | Rust. 기기용 정적 바이너리로 크로스 빌드 | `/usr/bin/tossd`, OpenRC 서비스 `tossd`(사용자 `tossd`), 로그 `/var/log/tossd.log` |
-| UI | `app/ui/` | 순수 QML (네이티브 코드 없음). Qt Quick이 GPU로 렌더링 | `/usr/share/toss/ui/`, `toss-shell`이 실행 (키오스크가 구동) |
-| 기기 배치 파일 | `app/rootfs/` | 서비스 스크립트, 런처 스크립트, root 헬퍼 `toss-helper`(전원, 절전, SSH) | 루트의 동일 경로 |
-| 리소스 측정 | `app/meter/` | Rust (`toss-meter`). 덱과 PC가 공용 | 데몬에 내장 |
-| 호스트 프로토콜, PC 커넥터 | `app/proto/`, `app/host/` | Rust | 덱에는 프로토콜만 데몬에 내장. [04-host-link.md](04-host-link.md) 참고 |
+| 데몬 `tossd` | `src/app/tossd/` | Rust. 기기용 정적 바이너리로 크로스 빌드 | `/usr/bin/tossd`, OpenRC 서비스 `tossd`(사용자 `tossd`), 로그 `/var/log/tossd.log` |
+| UI | `src/app/ui/` | 순수 QML (네이티브 코드 없음). Qt Quick이 GPU로 렌더링 | `/usr/share/toss/ui/`, `toss-shell`이 실행 (키오스크가 구동) |
+| 기기 배치 파일 | `src/app/rootfs/` | 서비스 스크립트, 런처 스크립트, root 헬퍼 `toss-helper`(전원, 절전, SSH) | 루트의 동일 경로 |
+| 리소스 측정 | `src/app/meter/` | Rust (`toss-meter`). 덱과 PC가 공용 | 데몬에 내장 |
+| 호스트 프로토콜, PC 커넥터 | `src/app/proto/`, `src/app/host/` | Rust | 덱에는 프로토콜만 데몬에 내장. [04-host-link.md](04-host-link.md) 참고 |
 
 ### 현재 지원 기능
 
@@ -623,8 +623,8 @@ MAC 주소는 `/etc/tossfront/eth0.mac`에 적힌 값으로 부팅 시 고정된
 | **페이지** | 타일 한 판. 좌우 스와이프로 전환. 동적 확장 가능 | `Page` |
 | **앱** | 기능 그룹. 예: Media. 위젯 추가 시 먼저 앱을 선택 | `AppInfo` (`catalog`의 한 항목) |
 | **위젯 종류** | 앱이 제공하는 위젯의 한 종류. 예: `media.player`. 차지하는 타일 크기가 정해져 있으며 한 앱에 여러 개가 있을 수 있음 | `Kind` (프로토콜의 `kind`) |
-| **위젯** | 위젯 종류를 타일에 배치한 인스턴스. 개별 설정을 가짐(예: 대상 PC 선택) | `Widget`, `app/ui/widgets/` |
-| **랙** | 버튼 위젯을 담는 컨테이너(그룹·폴더 역할). 타일 여러 개를 차지하며 라벨이 있음. 내부 슬롯 1칸이 타일 1칸에 해당 | `Rack`, `app/ui/shell/Rack.qml` |
+| **위젯** | 위젯 종류를 타일에 배치한 인스턴스. 개별 설정을 가짐(예: 대상 PC 선택) | `Widget`, `src/app/ui/widgets/` |
+| **랙** | 버튼 위젯을 담는 컨테이너(그룹·폴더 역할). 타일 여러 개를 차지하며 라벨이 있음. 내부 슬롯 1칸이 타일 1칸에 해당 | `Rack`, `src/app/ui/shell/Rack.qml` |
 | 버튼 위젯 | 랙 슬롯에 놓이는 소형 위젯: 버튼이나 노브 1개와 하단 라벨. **반드시 랙 내부에만 배치됨** | `form: "button"`, `CommandWidget` 등(공통 베이스 `CommandBase`) |
 | 스위치 버튼 위젯 | 온/오프 상태를 갖는 버튼 위젯. 켜져 있으면 버튼이 눌린 상태를 유지하고 인디케이터가 점등됨 | `kind: "command.switch"`, `CommandSwitchWidget` |
 | 노브 위젯 | 노브 1개로 구성된 버튼 위젯. 단계 노브(고정 단계 선택)와 연속 노브(범위 내 값 조절)가 있음. 라벨 아래에 현재 값 표시 | `kind: "command.stepped"`, `"command.linear"` |
@@ -653,7 +653,7 @@ UI와 데몬을 합친 프로그램 전체는 "스트림덱 앱"으로 부른다
 
 - **명령 위젯 4종은 PC에 등록된 명령 1개를 가리킨다.** 실행 내용, 단계/범위, 현재 상태는 모두 PC가 관리한다. 덱은 위젯 추가 시 골라 매핑만 한다([04-host-link.md](04-host-link.md) 4.6절 "명령").
 - 상태가 없는 실행 버튼(`command.run`)에는 인디케이터가 없고, 온/오프 상태가 있는 스위치에는 있다. 노브는 라벨 아래에 현재 값을 표시한다.
-- UI 구현은 위젯 종류별로 `app/ui/widgets/` 아래 파일이 대응된다: `MediaWidget`, `MeterWidget`(리소스 미터 4종 공용), `CommandWidget`, `CommandSwitchWidget`, `CommandSteppedWidget`, `CommandLinearWidget`(명령 위젯 4종 공통 베이스 `CommandBase`). 종류와 QML 파일 매핑은 `shell/WidgetSlot`의 `sources`에 정의돼 있다.
+- UI 구현은 위젯 종류별로 `src/app/ui/widgets/` 아래 파일이 대응된다: `MediaWidget`, `MeterWidget`(리소스 미터 4종 공용), `CommandWidget`, `CommandSwitchWidget`, `CommandSteppedWidget`, `CommandLinearWidget`(명령 위젯 4종 공통 베이스 `CommandBase`). 종류와 QML 파일 매핑은 `shell/WidgetSlot`의 `sources`에 정의돼 있다.
 - 해당 PC가 미연결이거나 위젯이 쓰는 것을 제공하지 않는 상태(권한 해제, 명령 삭제)에서는 위젯이 비활성화(흐림)돼 눌리지 않는다. 명령 위젯이 가리키는 명령의 종류가 위젯과 어긋난 경우에도 비활성화된다(버튼은 `run`, 스위치는 `switch`, 노브는 `stepped`·`linear`).
 - 새 위젯 종류 추가 방법은 3.17절을 참고한다.
 
@@ -671,7 +671,7 @@ UI와 데몬을 합친 프로그램 전체는 "스트림덱 앱"으로 부른다
 - **대상 선택**: 덱 자신(`This deck`, 설정 `host`가 `@deck`) 또는 페어링된 PC(해당 PC ID). 라벨에 대상 이름이 표시된다.
 - **메트릭 선택**: 해당 장치에서 수집 가능한 메트릭 목록 중 최대 수만큼 고른다. 선택한 순서대로 위에서 아래(2열이면 왼쪽 열부터)로 채워진다. 설정 `metrics`에 ID 배열로 저장된다.
 - **개별 행**: 짧은 이름, 게이지 바(12칸, 끝 2칸은 경고색), 수치. 게이지는 현재 값을 메트릭 상한으로 나눈 비율이다. 온도는 30°C를 하한으로 잡으며, 상한이 없는 메트릭(네트워크 속도 등)은 관측된 최댓값에 맞춰 스케일링한다.
-- **표시 중인 메트릭만 수집한다.** 데몬이 레이아웃에서 "어느 대상의 어떤 메트릭을 구독 중인지" 추출해(`Layout::watched`), 덱 자체 항목은 직접 측정하고(`app/meter`, 1초 주기) PC 항목은 해당 호스트에 구독 요청을 보낸다([04-host-link.md](04-host-link.md) 4.6절 "리소스 모니터링"). 위젯을 삭제하면 해당 메트릭 수집도 중단된다.
+- **표시 중인 메트릭만 수집한다.** 데몬이 레이아웃에서 "어느 대상의 어떤 메트릭을 구독 중인지" 추출해(`Layout::watched`), 덱 자체 항목은 직접 측정하고(`src/app/meter`, 1초 주기) PC 항목은 해당 호스트에 구독 요청을 보낸다([04-host-link.md](04-host-link.md) 4.6절 "리소스 모니터링"). 위젯을 삭제하면 해당 메트릭 수집도 중단된다.
 - 대상 PC가 오프라인이거나 메트릭 제공을 끈 상태면 행이 흐려지고 수치 자리에 `--`가 뜬다. 라벨 줄 끝 인디케이터로 데이터 수신 상태를 확인할 수 있다.
 - 덱에서 수집 가능한 항목: CPU 사용률(전체 및 코어 6개), 온도, 클럭 주파수, 로드 애버리지, 메모리, GPU 온도, 디스크 I/O 속도, 파일시스템 사용량(`/`, `/data`), 네트워크 속도. PC 측 항목은 04번 문서 표 참고.
 - 추가 후 대상이나 메트릭을 변경하는 UI는 아직 없다(삭제 후 재추가).
@@ -699,7 +699,7 @@ UI와 데몬을 합친 프로그램 전체는 "스트림덱 앱"으로 부른다
 - **저장 경로는 `/data/toss/layout.json`이다.** 재플래싱 후에도 유지된다(3.15절 "기기에만 남는 데이터"). 사용자 설정 데이터이므로 저장소에는 들어가지 않는다. 파일이 없으면 기본 레이아웃(`default_layout`)으로 시작하고, 파싱 실패나 규칙 위반 시 `layout.json.bad`로 백업한 뒤 기본 레이아웃으로 시작한다(3.15절 "기기에만 남는 데이터").
 - **위젯별 설정** (위 "앱과 위젯" 표 참고). 미디어 제어 위젯은 "대상 PC"를 선택한다: 미지정(`Any connected PC`)이면 연결된 첫 PC를 따라가고, 지정하면 해당 PC만 고정한다(미연결 시 `No host`). 리소스 미터는 대상 장치와 메트릭을, 명령 위젯은 PC와 명령을 선택한다. 메트릭이 수십 개여도 `ADD` 버튼은 헤더 바에 고정돼 항상 누를 수 있다. **추가 후 설정 변경 화면은 아직 없다**(삭제 후 재추가).
 - 관련 코드: 데몬 `layout/`(편집 처리 `edit.rs`의 `Edit`, 저장 `store.rs`의 `Store`, 위젯 카탈로그 `catalog.rs`의 `catalog`), UI `shell/Pager`(페이지와 타일, 배치 가이드와 드래그 프리뷰), `shell/Placed`(배치된 항목 위치와 편집 오버레이: `×`, `+`, 크기 조절 핸들), `shell/LayoutDrag`(드래그 상태와 규칙), `shell/EditBar`(편집 모드 상단바), `shell/AddPanel` 및 `shell/AddOption`(추가 시트와 옵션 컨트롤), `shell/RenameDialog`. 삭제 확인은 `Main.qml`에서 처리한다.
-- 자동화 테스트: 탭은 `scripts/tf-tap.sh`, 드래그는 `scripts/tf-drag.sh`(경유 지점 유지 시간은 `HOLD`로 지정).
+- 자동화 테스트: 탭은 `src/scripts/tf-tap.sh`, 드래그는 `src/scripts/tf-drag.sh`(경유 지점 유지 시간은 `HOLD`로 지정).
 
 ### 화면 밝기, 절전, 전원 끄기
 
@@ -707,8 +707,8 @@ UI와 데몬을 합친 프로그램 전체는 "스트림덱 앱"으로 부른다
 
 | | 제어 방식 | 정의 위치 |
 |---|---|---|
-| 밝기 | 백라이트 밝기 파일(`/sys/class/backlight/backlight/brightness`, 0~255)을 데몬 서비스 기동 시 `tossd` 그룹에 열어 둔다. 데몬이 해당 파일에 직접 write | `app/rootfs/etc/init.d/tossd`의 `start_pre` |
-| 전원 | root 권한 헬퍼가 FIFO(`/run/toss-helper`, root와 `tossd` 그룹만 쓰기 가능)를 열고 대기한다. 데몬이 `poweroff`를 쓰면 헬퍼가 `poweroff`를 실행한다(서비스를 순차 종료하는 정상 종료). 받는 명령은 `poweroff`, `sleep`, `ssh on`, `ssh off` 4종뿐이다. 헬퍼는 FIFO를 열어 둔 채 수신한 명령을 순차 처리한다 — 앞선 작업 중 들어온 명령도 유실되지 않고 순서대로 실행된다. FIFO 생성에 실패하면 종료하고 서비스가 재실행한다 | `app/rootfs/usr/libexec/toss-helper`, 서비스 `toss-helper` |
+| 밝기 | 백라이트 밝기 파일(`/sys/class/backlight/backlight/brightness`, 0~255)을 데몬 서비스 기동 시 `tossd` 그룹에 열어 둔다. 데몬이 해당 파일에 직접 write | `src/app/rootfs/etc/init.d/tossd`의 `start_pre` |
+| 전원 | root 권한 헬퍼가 FIFO(`/run/toss-helper`, root와 `tossd` 그룹만 쓰기 가능)를 열고 대기한다. 데몬이 `poweroff`를 쓰면 헬퍼가 `poweroff`를 실행한다(서비스를 순차 종료하는 정상 종료). 받는 명령은 `poweroff`, `sleep`, `ssh on`, `ssh off` 4종뿐이다. 헬퍼는 FIFO를 열어 둔 채 수신한 명령을 순차 처리한다 — 앞선 작업 중 들어온 명령도 유실되지 않고 순서대로 실행된다. FIFO 생성에 실패하면 종료하고 서비스가 재실행한다 | `src/app/rootfs/usr/libexec/toss-helper`, 서비스 `toss-helper` |
 | 절전 | 같은 FIFO에 `sleep`을 쓴다. 헬퍼가 Wi-Fi 매직 패킷 웨이크업을 켜고(`iw phy … wowlan enable magic-packet`) 얕은 절전(`echo freeze > /sys/power/state`)에 진입한다. 데몬은 슬립 직후 5초 안에 들어온 `sleep` 요청은 버린다 — 연타된 요청이 깨어난 직후 덱을 다시 재우는 것을 방지 | 위와 동일 |
 
 - **밝기는 기기에 저장된다.** 슬라이더에서 손을 뗀 최종값을 `/data/toss/settings.json`에 기록해 두고 데몬 기동 시 복원한다. 재플래싱 후에도 유지된다.
@@ -746,14 +746,14 @@ UI와 데몬을 합친 프로그램 전체는 "스트림덱 앱"으로 부른다
 | 제어 흐름 | 데몬이 root 헬퍼 FIFO(`/run/toss-helper`)에 `ssh on` 또는 `ssh off`를 쓰고, 전달이 성공했을 때만 설정 파일에 기록한다(실제 제어에 실패한 값을 기록해 현재 상태와 재부팅 후 상태가 어긋나는 것을 방지). 헬퍼가 `rc-service dropbear start` / `stop`을 실행하며, 끌 때는 남아 있는 dropbear 세션도 종료한다 |
 | UI 표시 | 설정 파일 값이 아니라 **실제 SSH 서버 구동 상태**를 표시한다(데몬이 1초마다 확인). 토글 후 실제 상태 전환이 반영되면 UI 토글이 넘어간다 |
 
-- **SSH를 꺼 두면 개발 스크립트도 동작하지 않는다**: `tf-ssh.sh`, `app-push.sh`, `tf-tap.sh`, 그리고 `deploy.sh`의 Loader 진입 단계. 개발이나 플래싱 시에는 덱 설정 화면에서 먼저 켜야 한다. UI가 뜨지 않을 때는 시리얼 콘솔(`scripts/console.py`)로 들어가 `/data/toss/settings.json`의 `"ssh"`를 `true`로 수정하고 `rc-service dropbear start`를 실행하거나, 초기화 버튼으로 Loader에 진입해 플래싱한다.
+- **SSH를 꺼 두면 개발 스크립트도 동작하지 않는다**: `tf-ssh.sh`, `app-push.sh`, `tf-tap.sh`, 그리고 `deploy.sh`의 Loader 진입 단계. 개발이나 플래싱 시에는 덱 설정 화면에서 먼저 켜야 한다. UI가 뜨지 않을 때는 시리얼 콘솔(`src/scripts/console.py`)로 들어가 `/data/toss/settings.json`의 `"ssh"`를 `true`로 수정하고 `rc-service dropbear start`를 실행하거나, 초기화 버튼으로 Loader에 진입해 플래싱한다.
 - 호스트(PC) 통신(포트 `7879`)은 SSH와 무관하다. SSH를 닫아도 `toss-connector` 연결은 정상 유지된다.
 - 인증 방식(무비밀번호 root)은 그대로다. 켜져 있는 동안의 보안 특성은 기존과 동일하다. 공개키 인증만 허용하려면 `flake.nix`의 `ssh.authorizedKeys`를 설정하면 된다.
-- 관련 코드: 데몬 `device.rs`(`set_ssh`), 헬퍼 `app/rootfs/usr/libexec/toss-helper`, UI `shell/SettingsMain`.
+- 관련 코드: 데몬 `device.rs`(`set_ssh`), 헬퍼 `src/app/rootfs/usr/libexec/toss-helper`, UI `shell/SettingsMain`.
 
 ### 데몬–UI 통신 프로토콜
 
-두 프로세스는 WebSocket(`ws://127.0.0.1:7878`)으로 JSON 텍스트 메시지를 주고받는다. 스펙 정본은 `app/tossd/src/ui_proto.rs` 상단에 있다. 데몬은 상태가 **변경될 때만** 푸시하며, 새로 접속한 UI 클라이언트에는 현재 전체 스냅샷을 보낸다.
+두 프로세스는 WebSocket(`ws://127.0.0.1:7878`)으로 JSON 텍스트 메시지를 주고받는다. 스펙 정본은 `src/app/tossd/src/ui_proto.rs` 상단에 있다. 데몬은 상태가 **변경될 때만** 푸시하며, 새로 접속한 UI 클라이언트에는 현재 전체 스냅샷을 보낸다.
 
 | 방향 | 메시지 | 의미 |
 |---|---|---|
@@ -826,10 +826,10 @@ UI와 데몬을 합친 프로그램 전체는 "스트림덱 앱"으로 부른다
 
 | 구성 | 위치 |
 |---|---|
-| 입력기–입력창 바인딩 | `app/rootfs/usr/bin/toss-shell`의 `QT_IM_MODULE=qtvirtualkeyboard` |
+| 입력기–입력창 바인딩 | `src/app/rootfs/usr/bin/toss-shell`의 `QT_IM_MODULE=qtvirtualkeyboard` |
 | 키보드 컨테이너 | `shell/KeyboardPanel`. 화면 하단에서 올라온다. 표시되는 동안 설정 패널과 추가 시트 콘텐츠 영역이 그만큼 줄어든다(`shell/DropPanel`의 `keyboardCover`) |
 | 활성 언어 | `KeyboardPanel`의 `locales`. 현재 `["en_US"]`(영문·숫자·기호). `["en_US", "ko_KR"]` 등으로 늘리면 키보드 지구본 키로 전환 가능(**다른 언어는 미테스트**) |
-| 키 스타일 | `app/ui/QtQuick/VirtualKeyboard/Styles/toss/style.qml`. 일반 버튼과 동일한 컴포넌트(`kit/Button`)로 렌더링. 디렉터리 이름과 depth는 Qt 규약이며, `toss-shell`의 `QML_IMPORT_PATH`와 `QT_VIRTUALKEYBOARD_STYLE=toss`로 지정한다 |
+| 키 스타일 | `src/app/ui/QtQuick/VirtualKeyboard/Styles/toss/style.qml`. 일반 버튼과 동일한 컴포넌트(`kit/Button`)로 렌더링. 디렉터리 이름과 depth는 Qt 규약이며, `toss-shell`의 `QML_IMPORT_PATH`와 `QT_VIRTUALKEYBOARD_STYLE=toss`로 지정한다 |
 | 입력창 | `kit/TextField` |
 
 - **버튼 클릭으로 입력창 텍스트를 읽을 때는 먼저 포커스를 해제해야 한다**(`TextField`의 `blur()`). 조합 중(preedit)이거나 단어 추천 중인 글자는 아직 `text` 프로퍼티에 확정 반영되지 않기 때문이다. `blur()`는 조합 중인 텍스트를 커밋하고 키보드를 내린다. 이름 변경 다이얼로그의 `SAVE`와 추가 시트의 `ADD`가 이 방식을 쓰며, 추가 시트는 닫힐 때도 입력을 마무리한다(`AddPanel`의 `leave()`). 키보드 엔터 키는 자체적으로 조합을 확정하고 `accepted()` 시그널을 낸다.
@@ -852,20 +852,20 @@ devshell에 Rust 툴체인(`rustc`, `cargo`, 타깃 musl std 포함)이 들어 �
 
 | 작업 | 명령 |
 |---|---|
-| 데몬 단위 테스트 (PC) | `cd app/tossd && cargo test` (38개: 레이아웃 규칙과 편집·저장, UI 접속, 호스트와 페어링, Wi-Fi, 밝기와 전원, SSH, 상태 버전과 리소스, 원자적 파일 저장) |
-| 리소스 미터 테스트·기기 수집 항목 조회 | `cd app/meter && cargo test` (4개), `cargo run --example show` |
-| 데몬 로컬 실행 (PC) | `cd app/tossd && cargo run` (PC `127.0.0.1:7878` 바인딩) |
-| 수정 사항 즉시 푸시 (플래싱 없음) | `scripts/app-push.sh ui`, `scripts/app-push.sh tossd`, 또는 `scripts/app-push.sh` (둘 다) |
+| 데몬 단위 테스트 (PC) | `cd src/app/tossd && cargo test` (38개: 레이아웃 규칙과 편집·저장, UI 접속, 호스트와 페어링, Wi-Fi, 밝기와 전원, SSH, 상태 버전과 리소스, 원자적 파일 저장) |
+| 리소스 미터 테스트·기기 수집 항목 조회 | `cd src/app/meter && cargo test` (4개), `cargo run --example show` |
+| 데몬 로컬 실행 (PC) | `cd src/app/tossd && cargo run` (PC `127.0.0.1:7878` 바인딩) |
+| 수정 사항 즉시 푸시 (플래싱 없음) | `src/scripts/app-push.sh ui`, `src/scripts/app-push.sh tossd`, 또는 `src/scripts/app-push.sh` (둘 다) |
 | 화면 캡처 | 3.7절 C |
-| 무인 화면 탭 | `scripts/tf-tap.sh <x> <y> …` (화면 픽셀 좌표. 터치 입력 장치에 이벤트 주입) |
-| 무인 화면 드래그 | `scripts/tf-drag.sh <x1> <y1> <x2> <y2> …` (경유점 대기 시간 `HOLD=초`. 가장자리 페이지 넘김 테스트용) |
-| PC 커넥터·프로토콜 테스트 | `cd app/host && cargo test`, `cd app/proto && cargo test` ([04-host-link.md](04-host-link.md) 4.12절) |
-| 데몬 실시간 로그 | `scripts/tf-ssh.sh 'tail -f /var/log/tossd.log'` |
-| UI 로그 (QML 에러) | `scripts/tf-ssh.sh 'grep -v "^00:" /var/log/kiosk.log'` |
+| 무인 화면 탭 | `src/scripts/tf-tap.sh <x> <y> …` (화면 픽셀 좌표. 터치 입력 장치에 이벤트 주입) |
+| 무인 화면 드래그 | `src/scripts/tf-drag.sh <x1> <y1> <x2> <y2> …` (경유점 대기 시간 `HOLD=초`. 가장자리 페이지 넘김 테스트용) |
+| PC 커넥터·프로토콜 테스트 | `cd src/app/host && cargo test`, `cd src/app/proto && cargo test` ([04-host-link.md](04-host-link.md) 4.12절) |
+| 데몬 실시간 로그 | `src/scripts/tf-ssh.sh 'tail -f /var/log/tossd.log'` |
+| UI 로그 (QML 에러) | `src/scripts/tf-ssh.sh 'grep -v "^00:" /var/log/kiosk.log'` |
 
-`app-push.sh`는 이미지를 굽지 않고 기기 파일만 덮어씌우는 개발용 스크립트다. UI는 수 초 안에 재시작된다. QML 파일은 기존 디렉터리 위에 덮어쓰므로 저장소에서 삭제한 파일은 기기에 남아 있다가 다음 이미지 플래싱 시 정리된다. 푸시 시 파일 mtime을 현재 시각으로 갱신한다: Qt QML 컴파일 캐시(`/home/kiosk/.cache`)는 mtime만 보고 유효성을 판단하므로 mtime이 같고 내용만 다른 파일을 수동 복사하면 이전 캐시가 그대로 뜰 수 있기 때문이다. 변경을 영구 반영하려면 `scripts/deploy.sh userdata`로 플래싱한다(3.6절).
+`app-push.sh`는 이미지를 굽지 않고 기기 파일만 덮어씌우는 개발용 스크립트다. UI는 수 초 안에 재시작된다. QML 파일은 기존 디렉터리 위에 덮어쓰므로 저장소에서 삭제한 파일은 기기에 남아 있다가 다음 이미지 플래싱 시 정리된다. 푸시 시 파일 mtime을 현재 시각으로 갱신한다: Qt QML 컴파일 캐시(`/home/kiosk/.cache`)는 mtime만 보고 유효성을 판단하므로 mtime이 같고 내용만 다른 파일을 수동 복사하면 이전 캐시가 그대로 뜰 수 있기 때문이다. 변경을 영구 반영하려면 `src/scripts/deploy.sh userdata`로 플래싱한다(3.6절).
 
-데몬에 의존 크레이트를 추가했다면 `app/tossd/Cargo.lock`도 함께 커밋해야 한다. Nix 빌드는 이 lock 파일의 해시로 크레이트를 검증한다. C 코드가 포함된 크레이트는 크로스 C 컴파일러 설정이 추가로 필요해지므로 가급적 피하는 편이 좋다.
+데몬에 의존 크레이트를 추가했다면 `src/app/tossd/Cargo.lock`도 함께 커밋해야 한다. Nix 빌드는 이 lock 파일의 해시로 크레이트를 검증한다. C 코드가 포함된 크레이트는 크로스 C 컴파일러 설정이 추가로 필요해지므로 가급적 피하는 편이 좋다.
 
 **QML 코드에 에러가 있으면** UI 프로세스가 뜨자마자 종료되고 키오스크가 재실행을 반복한다. 그동안 화면은 검게 유지되고 화면 캡처 명령도 응답하지 않고 대기한다. UI 로그에서 `…qml:줄:칸: …` 라인을 찾으면 된다(위 표 명령 참고). 푸시 전 QML 문법 검사 도구는 devshell에 없다.
 
@@ -888,7 +888,7 @@ devshell에 Rust 툴체인(`rustc`, `cargo`, 타깃 musl std 포함)이 들어 �
 
 ### 코드 구조
 
-UI (`app/ui/`):
+UI (`src/app/ui/`):
 
 | 모듈/파일 | 역할 | 앱 추가 시 |
 |---|---|---|
@@ -940,7 +940,7 @@ UI (`app/ui/`):
 | `MediaWidget` | 미디어 제어 위젯 |
 | `MeterWidget` | 리소스 미터 위젯 (4종 크기 공용) |
 
-데몬 (`app/tossd/src/`):
+데몬 (`src/app/tossd/src/`):
 
 | 파일 | 역할 | 앱 추가 시 |
 |---|---|---|
@@ -956,7 +956,7 @@ UI (`app/ui/`):
 | `hosts/pairing.rs` | 페어링 모드 및 후보 관리, 양측 검증 처리 | 수정 불필요 |
 | `hosts/blob.rs` | 청크로 수신되는 앨범 아트 바이너리 조립 | 수정 불필요 |
 | `hosts/store.rs` | 페어링 호스트 목록(`hosts.json`)과 덱 키(`key`) 파일 저장 | 수정 불필요 |
-| `sys.rs` | 시스템 상태 수집(상단바 및 정보 시트용: 호스트명, IP, 인터페이스 링크 상태). 리소스 사용량은 `app/meter`(PC 공용 크레이트)가 측정하며 `state.rs`가 1초마다 호출 | 수정 불필요 |
+| `sys.rs` | 시스템 상태 수집(상단바 및 정보 시트용: 호스트명, IP, 인터페이스 링크 상태). 리소스 사용량은 `src/app/meter`(PC 공용 크레이트)가 측정하며 `state.rs`가 1초마다 호출 | 수정 불필요 |
 | `device.rs` | 덱 하드웨어 제어: 화면 밝기, 절전, 전원 종료, SSH 토글 | 수정 불필요 |
 | `wifi.rs` | Wi-Fi 상태 및 접속 관리 (`wpa_supplicant` 제어 소켓 연동) | 수정 불필요 |
 | `persist.rs` | 원자적 파일 저장(임시 파일 쓰기 + fsync + rename) 및 손상 파일 `.bad` 격리 | 수정 불필요 |
@@ -1003,7 +1003,7 @@ UI (`app/ui/`):
 | `value` | 해당 명령의 현재 값(호스트가 보고한 값): 스위치 0/1, 단계는 인덱스(0부터), 범위는 수치 값. 모르면 `undefined` |
 | `metrics`, `metricValues`, `meterSource` | 리소스 미터용. 위젯 설정 `host`가 가리키는 대상(`@deck`이면 덱 자신)에서 수집 가능한 메트릭 목록, 그 현재 값(메트릭 ID → 값. 이 위젯이 선택한 항목만 전달), 대상의 이름과 값 수신 여부(`own`, `name`, `live`) |
 
-호스트에서 오는 데이터는 `host`로 들어온다: 재생 정보(`host.media`), 앨범 아트(`host.art`), 등록된 명령 목록(`host.commands`). 자주 바뀌는 값은 따로 전달된다 — 스위치·노브 값(`value`)과 메트릭 값(`metricValues`). **호스트는 이벤트가 생겼을 때만 보낸다.** 재생 위치처럼 계속 흐르는 값은 위젯이 수신한 값을 기준으로 직접 계산한다(`MediaWidget`이 이 방식). 다른 종류의 데이터나 액션을 추가하려면 프로토콜(`app/proto`)에 메시지와 액션 이름을 추가하고, PC 커넥터(`app/host`)에 이를 수집하거나 실행하는 코드를 넣는다. 절차는 [04-host-link.md](04-host-link.md) 4.12절에 있다. **호스트는 덱에 허용한 액션만 실행하므로, 새 액션에는 권한도 함께 정의한다.** 미디어 제어 위젯(`MediaWidget`)이 레퍼런스다.
+호스트에서 오는 데이터는 `host`로 들어온다: 재생 정보(`host.media`), 앨범 아트(`host.art`), 등록된 명령 목록(`host.commands`). 자주 바뀌는 값은 따로 전달된다 — 스위치·노브 값(`value`)과 메트릭 값(`metricValues`). **호스트는 이벤트가 생겼을 때만 보낸다.** 재생 위치처럼 계속 흐르는 값은 위젯이 수신한 값을 기준으로 직접 계산한다(`MediaWidget`이 이 방식). 다른 종류의 데이터나 액션을 추가하려면 프로토콜(`src/app/proto`)에 메시지와 액션 이름을 추가하고, PC 커넥터(`src/app/host`)에 이를 수집하거나 실행하는 코드를 넣는다. 절차는 [04-host-link.md](04-host-link.md) 4.12절에 있다. **호스트는 덱에 허용한 액션만 실행하므로, 새 액션에는 권한도 함께 정의한다.** 미디어 제어 위젯(`MediaWidget`)이 레퍼런스다.
 
 명령 위젯(호스트에 등록된 명령 1개를 가리키는 버튼 위젯)은 `CommandBase`를 루트로 사용한다. 위 프로퍼티에 더해 아래 항목이 있다.
 
@@ -1019,11 +1019,11 @@ UI (`app/ui/`):
 
 ### 새 앱 추가 순서
 
-1. **데몬에 위젯 종류를 추가한다.** `app/tossd/src/layout/mod.rs`의 `Kind`에 이름을 추가한다(`"앱.종류"` 형식. 예: `media.player`). 복합 위젯이면 `is_composite`에도 추가한다. 복합 위젯은 페이지에 직접 배치되고, 그 외에는 랙 내부에만 배치할 수 있다. 이 규칙은 `Layout::check`가 검증한다: 규칙에 어긋나는 편집 요청은 거절하고, 규칙에 어긋난 저장 파일은 백업한 뒤 기본 레이아웃으로 시작한다.
+1. **데몬에 위젯 종류를 추가한다.** `src/app/tossd/src/layout/mod.rs`의 `Kind`에 이름을 추가한다(`"앱.종류"` 형식. 예: `media.player`). 복합 위젯이면 `is_composite`에도 추가한다. 복합 위젯은 페이지에 직접 배치되고, 그 외에는 랙 내부에만 배치할 수 있다. 이 규칙은 `Layout::check`가 검증한다: 규칙에 어긋나는 편집 요청은 거절하고, 규칙에 어긋난 저장 파일은 백업한 뒤 기본 레이아웃으로 시작한다.
 2. **카탈로그에 등록한다.** `layout/catalog.rs`의 `catalog`에 등록한다: 소속 앱, 이름과 설명, 배치 형태(`form`: 페이지에 놓는 복합 위젯은 `widget`, 랙 슬롯에 넣는 버튼 위젯은 `button`), 크기, 새로 배치할 때의 라벨, 추가 시 선택할 설정. 등록하면 편집 모드의 `+` 메뉴에 나타난다. 기본 레이아웃에도 넣으려면 `layout/mod.rs`의 `default_layout`에 1줄을 추가한다.
-3. **위젯 QML 파일을 만든다.** `app/ui/widgets/`에 파일을 추가한다. 복합 위젯은 `CompositeWidget`을 루트로 쓰면 위젯 프레임과 라벨, 나사가 붙는다. 버튼 위젯은 `WidgetBase`에 `kit/LabeledButton`(버튼, 그 아래 인디케이터와 라벨)이나 `kit/LabeledKnob`을 넣는다 — 프레임과 나사는 랙이 갖는다. 호스트에 등록된 명령을 가리키는 위젯이면 `WidgetBase` 대신 `CommandBase`를 루트로 쓴다.
-4. **위젯 종류와 QML 파일을 매핑한다.** `app/ui/shell/WidgetSlot.qml`의 `sources`에 `"위젯 종류의 이름": "../widgets/파일.qml"` 1줄을 추가한다. 빠뜨리면 해당 자리는 비고 UI 로그에 `알 수 없는 위젯 종류`가 찍힌다.
-5. **테스트한다.** `cd app/tossd && cargo test` 후 `scripts/app-push.sh`로 기기에 푸시한다.
+3. **위젯 QML 파일을 만든다.** `src/app/ui/widgets/`에 파일을 추가한다. 복합 위젯은 `CompositeWidget`을 루트로 쓰면 위젯 프레임과 라벨, 나사가 붙는다. 버튼 위젯은 `WidgetBase`에 `kit/LabeledButton`(버튼, 그 아래 인디케이터와 라벨)이나 `kit/LabeledKnob`을 넣는다 — 프레임과 나사는 랙이 갖는다. 호스트에 등록된 명령을 가리키는 위젯이면 `WidgetBase` 대신 `CommandBase`를 루트로 쓴다.
+4. **위젯 종류와 QML 파일을 매핑한다.** `src/app/ui/shell/WidgetSlot.qml`의 `sources`에 `"위젯 종류의 이름": "../widgets/파일.qml"` 1줄을 추가한다. 빠뜨리면 해당 자리는 비고 UI 로그에 `알 수 없는 위젯 종류`가 찍힌다.
+5. **테스트한다.** `cd src/app/tossd && cargo test` 후 `src/scripts/app-push.sh`로 기기에 푸시한다.
 
 최소 복합 위젯 예시(호스트명을 표시하고, 버튼을 누르면 이 위젯의 대상 PC에 다음 곡 액션을 요청한다):
 
@@ -1068,13 +1068,13 @@ CompositeWidget {
 
 ## 3.18 호스트(PC) 연동
 
-덱은 PC와 연결돼 PC 상태를 표시하고 PC에 액션을 요청한다. 연결되는 PC를 **호스트**라고 부르며, 거기서 실행되는 프로그램이 `toss-connector`(`app/host/`)다.
+덱은 PC와 연결돼 PC 상태를 표시하고 PC에 액션을 요청한다. 연결되는 PC를 **호스트**라고 부르며, 거기서 실행되는 프로그램이 `toss-connector`(`src/app/host/`)다.
 
 **프로토콜, 암호화, 페어링, 호스트가 덱에 허용하는 권한, PC 커넥터, 확장 방법은 모두 [04-host-link.md](04-host-link.md)에 있다.** 여기에는 사용법만 정리한다.
 
 | 작업 | 방법 |
 |---|---|
-| PC 커넥터 빌드 및 실행 | `nix build .#toss-connector && ./result/bin/toss-connector` (로그인한 사용자 세션에서) |
+| PC 커넥터 빌드 및 실행 | `nix build .#toss-connector -o dist/toss-connector && ./dist/toss-connector/bin/toss-connector` (로그인한 사용자 세션에서) |
 | PC 커넥터를 NixOS에 설치 | 시스템 flake에 이 저장소를 input으로 추가하고 `toss-front.nixosModules.default`를 넣은 뒤 `programs.toss-connector.enable = true;`. 로그인하면 자동 실행된다([04-host-link.md](04-host-link.md) 4.10절) |
 | 페어링 | 덱: 설정 → `Paired devices` → `PAIR NEW DEVICE`. PC: 웹 콘솔의 "새 덱 페어링", 또는 `toss-connector pair`(USB)·`toss-connector pair --deck <주소>`(LAN). 양쪽에 표시된 6자리 숫자가 같으면 덱에서 `ACCEPT`, PC에서 "숫자 일치"(터미널이면 `y`) |
 | 덱에 허용한 권한 조회·변경 | 웹 콘솔의 토글, 또는 `toss-connector trust`, `toss-connector allow <권한>`, `toss-connector deny <권한>` |

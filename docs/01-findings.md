@@ -129,7 +129,7 @@ RSCE 형식(블록 = 512바이트): 헤더 1블록(`RSCE`, 버전, 테이블 오
 
 ## 1.3 하드웨어 구성
 
-원자료: `analysis/device/`(순정 커널 런타임 덤프), `analysis/dtb/`(순정 DT), `analysis/mainline/`(메인라인 부팅 로그).
+원자료: `local/analysis/device/`(순정 커널 런타임 덤프), `local/analysis/dtb/`(순정 DT), `local/analysis/mainline/`(메인라인 부팅 로그).
 
 ### 전원
 
@@ -314,7 +314,7 @@ IO 전압 도메인: bt656 <- vcc_1v8, audio <- vcc1v8_dvp, sdmmc <- vcc_sd, gpi
 | Qt QML 캐시 | QML을 컴파일해 사용자 디렉터리(`~/.cache`)에 캐시해 두고, mtime(초 단위)만 비교해 재사용한다. 초 단위 mtime이 같도록 다른 내용의 파일로 덮어쓰면 이전 내용이 그대로 뜬다 | 기기 |
 | 한·중·일 글꼴 | Alpine의 `font-noto-cjk`(설치 크기 88MB)에 Noto Sans CJK와 Noto Serif CJK의 Regular·Bold가 포함돼 있다. 국가별 5종과 고정 폭 숫자용 Mono가 함께 인식된다(총 15종). 다른 굵기는 `font-noto-cjk-extra`(208MB)에 있다 | 기기 |
 | 스트림덱 UI 부하 | 유휴 상태에서 UI 프로세스의 CPU 점유율 1.3~2.5%(코어 1개 기준. 약 1초마다 시스템 상태가 바뀔 때만 리드로우), 메모리(RSS) 165~200MB(설정과 키보드를 열어 본 뒤 증가) | 기기 |
-| 터치 입력 주입 | 터치 입력 장치(`/dev/input/event*`)에 press/release 이벤트를 write하면 실제 터치처럼 앱에 전달된다. 좌표는 패널 기준(두 축 0~16383)이고, 이벤트 묶음을 단일 `write`로 넘겨야 한다(쪼개서 쓰면 거부됨). `scripts/tf-tap.sh` | 기기 |
+| 터치 입력 주입 | 터치 입력 장치(`/dev/input/event*`)에 press/release 이벤트를 write하면 실제 터치처럼 앱에 전달된다. 좌표는 패널 기준(두 축 0~16383)이고, 이벤트 묶음을 단일 `write`로 넘겨야 한다(쪼개서 쓰면 거부됨). `src/scripts/tf-tap.sh` | 기기 |
 | 앱 내 온스크린 키보드 | `QT_IM_MODULE=qtvirtualkeyboard`로 Qt Virtual Keyboard를 켜면 Wayland에서 "클라이언트 쪽에서는 지원하지 않는다"는 경고가 뜨지만, 앱 내부 `InputPanel`은 정상 동작한다. Alpine 패키지에 한국어·일본어·중국어·태국어 입력기가 함께 들어 있다(설치 크기 6.1MB, 의존성 `libhunspell` 0.7MB). 키 스타일은 커스텀 `style.qml`로 바꿀 수 있다 | 기기 |
 | `wpa_supplicant` 제어 | 설정 파일의 `ctrl_interface=DIR=… GROUP=<그룹>`으로 제어 소켓을 그룹에 열면 비루트 프로세스도 스캔·연결·저장을 요청할 수 있다. 응답 수신용 소켓은 abstract unix socket을 써도 된다. 잘못된 비밀번호는 약 20초 뒤 해당 AP가 `TEMP-DISABLED`로 표시되는 것으로 판별한다 | 기기 |
 | Wi-Fi SDIO 클럭 | 순정 값인 150MHz(SDR104)에서는 칩이 슬립에서 깨어날 때 버스 에러가 발생한다(`brcmf_sdio_bus_sleep: error while changing bus sleep state -84`, `halting operation`). 부팅 직후에도 발생하며, 쿼리를 0.2초 간격으로 보내면 350회 안에 터졌다. 클럭을 50MHz로 낮추면 같은 테스트에서 재현되지 않았다. 에러가 난 뒤에는 링크가 유지된 것처럼 보여도 명령이 타임아웃된다 | 기기 |

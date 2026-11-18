@@ -2,17 +2,17 @@
 # (fakeroot: 파일 소유자를 root로 기록하기 위해 사용).
 #
 # 입력(환경 변수):
-#   src            저장소 파일(`os/rootfs`, `scripts/gen-beep.py`)
+#   src            저장소 파일(`src/os/rootfs`, `src/scripts/gen-beep.py`)
 #   minirootfs     Alpine 기본 루트 타르볼
 #   apkRepo        고정된 패키지만 포함한 로컬 APK 저장소
-#   packages       설치할 패키지 목록(`os/alpine/packages`)
+#   packages       설치할 패키지 목록(`src/os/alpine/packages`)
 #   repositories   기기의 `/etc/apk/repositories` 내용
 #   firmware tools kernel   선행 빌드 결과물
 #   hostname sshLan authorizedKeys ntpEnable timezone zoneinfo kioskEnable kioskCommand tossEnable   `buildImage` 옵션(`flake.nix`)
 #   tossd tossFiles   스트림덱 앱 바이너리 및 파일(`tossEnable`이 true일 때만 전달)
 #   out            출력 디렉터리
 #
-# 저장소 파일(`os/rootfs`, `tossEnable` 시 `app/rootfs` 및 `app/ui`)은 모두 동일한 규칙으로 덮어쓴다:
+# 저장소 파일(`src/os/rootfs`, `tossEnable` 시 `src/app/rootfs` 및 `src/app/ui`)은 모두 동일한 규칙으로 덮어쓴다:
 # 디렉터리는 755, 실행 비트가 있는 파일은 755, 나머지는 644. 실행 파일에는 git 인덱스에 실행 비트를 부여해 두어야 한다 —
 # `etc/init.d`, `etc/local.d/*.start`, `usr/bin`, `usr/sbin`, `usr/libexec` 아래 파일에 실행 비트가 없으면 빌드가 실패한다.
 # Alpine 패키지는 설치 스크립트를 실행하지 않으므로(`--no-scripts`) 패키지가 만들던 사용자/그룹은 여기서 직접 생성한다
@@ -75,12 +75,12 @@ apk --root "$r" --arch aarch64 --no-scripts --no-network --no-cache --allow-untr
 tail -n 1 apk.log
 
 echo "[rootfs] 설정 적용"
-overlay "$src/os/rootfs" "$r"
+overlay "$src/src/os/rootfs" "$r"
 
 install -D -m 755 "$tools/bin/reboot-mode" "$r/usr/sbin/reboot-mode"
 install -D -m 755 "$tools/bin/i2c-read" "$r/usr/sbin/i2c-read"
 mkdir -p "$r/usr/share/sounds/tossfront"
-python3 -I "$src/scripts/gen-beep.py" "$r/usr/share/sounds/tossfront/reference.wav"
+python3 -I "$src/src/scripts/gen-beep.py" "$r/usr/share/sounds/tossfront/reference.wav"
 
 echo "$hostname" >"$r/etc/hostname"
 printf '%s\n' "$repositories" >"$r/etc/apk/repositories"
@@ -161,8 +161,8 @@ fi
 
 if [ "$tossEnable" = true ]; then
   install -D -m 755 "$tossd/bin/tossd" "$r/usr/bin/tossd"
-  overlay "$tossFiles/app/rootfs" "$r"
-  overlay "$tossFiles/app/ui" "$r/usr/share/toss/ui"
+  overlay "$tossFiles/src/app/rootfs" "$r"
+  overlay "$tossFiles/src/app/ui" "$r/usr/share/toss/ui"
   enable default toss-helper tossd
 fi
 echo "[rootfs] 스트림덱 앱(TOSS) $tossEnable"

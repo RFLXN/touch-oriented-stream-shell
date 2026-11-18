@@ -3,13 +3,7 @@
 #   2. 기기에서 덤프/수집한 파일(예: `device-backup.tar.gz`, 터치 로그 `touch.bin`) — 호스트 키 같은 기기 고유 값이 포함될 수 있다.
 #   3. 빌드 결과물 및 도구 임시 파일.
 # flake는 git이 추적하는 파일만 Nix 스토어로 복사하므로 여기에 제외된 파일은 빌드 입력으로 유입되지 않는다.
-/backup/
-/downgrade/
-/lineage/
-/loader/
-/analysis/
-/archive/
-/device/
+/local/
 *.zip
 *.img
 *.log
@@ -17,7 +11,7 @@
 *.tar.gz
 *.bin
 
-/build/
+/dist/
 result
 result-*
 target/

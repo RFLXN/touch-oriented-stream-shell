@@ -18,7 +18,7 @@
 | 남은 과제 및 검증 범위 | 4.13절 |
 
 - 덱 앱 아키텍처(데몬과 UI)는 [03-userland-guide.md](03-userland-guide.md) 3.16절, 위젯 추가 방법은 3.17절 참고.
-- 프로토콜 정본은 코드다(`app/proto/src/lib.rs`). 이 문서와 코드가 다르면 코드가 우선이며 문서를 수정해야 한다.
+- 프로토콜 정본은 코드다(`src/app/proto/src/lib.rs`). 이 문서와 코드가 다르면 코드가 우선이며 문서를 수정해야 한다.
 
 ## 4.1 전체 구조
 
@@ -36,12 +36,12 @@
 
 | 모듈/컴포넌트 | 위치 | 역할 |
 |---|---|---|
-| 프로토콜 `toss-proto` | `app/proto/` | 메시지 포맷(`src/lib.rs`), 키와 암호화(`src/secure.rs`). 덱 데몬과 호스트 커넥터가 공용 |
-| 호스트 커넥터 `toss-connector` | `app/host/` | PC에서 동작. 페어링된 덱에 접속해 상태를 보내고 허용 범위 내 액션을 실행. 웹 콘솔도 제공(`console/`) |
-| 리소스 측정 `toss-meter` | `app/meter/` | CPU, 메모리, GPU, 디스크, 네트워크, 온도 측정. 덱(자체 리소스)과 호스트(PC 리소스)가 공용 |
+| 프로토콜 `toss-proto` | `src/app/proto/` | 메시지 포맷(`src/lib.rs`), 키와 암호화(`src/secure.rs`). 덱 데몬과 호스트 커넥터가 공용 |
+| 호스트 커넥터 `toss-connector` | `src/app/host/` | PC에서 동작. 페어링된 덱에 접속해 상태를 보내고 허용 범위 내 액션을 실행. 웹 콘솔도 제공(`console/`) |
+| 리소스 측정 `toss-meter` | `src/app/meter/` | CPU, 메모리, GPU, 디스크, 네트워크, 온도 측정. 덱(자체 리소스)과 호스트(PC 리소스)가 공용 |
 | NixOS 패키지·모듈 | `nix/toss-connector.nix`, `nix/nixos-module.nix` | 호스트 커넥터 설치 및 자동 실행. 권한과 명령을 설정으로 선언 가능 |
-| 덱 측 호스트 계층 | `app/tossd/src/hosts/` | 호스트 연결 수락. 페어링, 호스트 상태를 UI로 전달, UI 액션을 호스트로 전달 (4.11절) |
-| 덱 UI | `app/ui/shell/DevicesPage`, `DevicePage`, `PairPage`, `app/ui/widgets/MediaWidget`, `MeterWidget`, `CommandBase`, `CommandWidget`, `CommandSwitchWidget`, `CommandSteppedWidget`, `CommandLinearWidget` | 설정의 `Paired devices`(목록, 페어링, 삭제 — 삭제는 확인 다이얼로그) 및 호스트 연동 위젯(미디어 제어, 리소스 미터, 명령 버튼, 명령 스위치, 단계 노브, 연속 노브. 명령 위젯 4종 공통 베이스는 `CommandBase`) |
+| 덱 측 호스트 계층 | `src/app/tossd/src/hosts/` | 호스트 연결 수락. 페어링, 호스트 상태를 UI로 전달, UI 액션을 호스트로 전달 (4.11절) |
+| 덱 UI | `src/app/ui/shell/DevicesPage`, `DevicePage`, `PairPage`, `src/app/ui/widgets/MediaWidget`, `MeterWidget`, `CommandBase`, `CommandWidget`, `CommandSwitchWidget`, `CommandSteppedWidget`, `CommandLinearWidget` | 설정의 `Paired devices`(목록, 페어링, 삭제 — 삭제는 확인 다이얼로그) 및 호스트 연동 위젯(미디어 제어, 리소스 미터, 명령 버튼, 명령 스위치, 단계 노브, 연속 노브. 명령 위젯 4종 공통 베이스는 `CommandBase`) |
 
 ### 요구사항과 설계 결정
 
@@ -198,8 +198,8 @@ NixOS에서는 시스템 설정으로 권한을 고정할 수도 있다(`program
 
 | 필요한 기능 | 기존 구현 |
 |---|---|
-| 권한 목록, 이름, 설명, 기본값 | `app/host/src/trust.rs`의 `PERMISSIONS` 테이블 단일 정의. CLI도 이 테이블을 참조해 출력 |
-| 덱별 설정 읽고 쓰기 | `app/host/src/store.rs`의 `Store::decks`(읽기), `Store::update`(해당 덱 항목만 수정) |
+| 권한 목록, 이름, 설명, 기본값 | `src/app/host/src/trust.rs`의 `PERMISSIONS` 테이블 단일 정의. CLI도 이 테이블을 참조해 출력 |
+| 덱별 설정 읽고 쓰기 | `src/app/host/src/store.rs`의 `Store::decks`(읽기), `Store::update`(해당 덱 항목만 수정) |
 | 변경 시 곧 반영 | 실행 중인 프로세스가 `decks.json` 변경을 감지해 다시 로드. 설정 UI는 파일만 수정하면 됨(같은 프로세스든 별도 프로세스든 동일) |
 
 ## 4.6 메시지 스펙
@@ -334,7 +334,7 @@ toss-connector allow command.run                     # 덱에 실행 권한 부�
 - **수집 가능한 항목 목록은 호스트가 알려 준다**(`metrics`). 덱은 그 목록에서 고르기만 한다. 메트릭마다 내부 식별자(`id`), 미터 옆 짧은 이름(`name`, 5자 이내), 선택 화면용 긴 이름(`title`), 단위(`unit`), 상한(`max`, 0이면 상한 없음 — 덱이 관측한 최댓값에 맞춰 스케일링), 소수 자릿수가 전달된다.
 - **덱이 표시 중인 메트릭만 수집한다.** 덱은 레이아웃 내 리소스 미터 위젯들이 구독하는 메트릭을 호스트별로 모아 `watch`로 알린다. 호스트는 그 목록만 약 1초 간격으로 측정해 **값이 달라진 항목만** `metric_values`로 보낸다. 값은 표시 자릿수로 반올림해 비교하므로 화면상 차이가 없는 미세 변동은 전송하지 않는다. 덱이 아무것도 구독하지 않으면 호스트도 측정하지 않는다(다른 상태와 동일한 원칙: 전송 판단은 호스트가 담당).
 - 단위 처리: `%`, `°C`, `GHz`, `W`, `RPM`은 수치 뒤에 그대로 붙인다. `B`(바이트)와 `B/s`(초당 바이트)는 덱이 크기에 맞게 KB·MB·GB로 변환한다. 빈 문자열은 무차원 수치다(로드 애버리지 등).
-- 수집 코드는 덱과 PC가 동일한 크레이트를 사용한다(`app/meter`, `toss-meter`). 리눅스(`/proc`, `/sys`)만 지원하며 다른 OS 호스트는 `resource.info`를 제공하지 않는다.
+- 수집 코드는 덱과 PC가 동일한 크레이트를 사용한다(`src/app/meter`, `toss-meter`). 리눅스(`/proc`, `/sys`)만 지원하며 다른 OS 호스트는 `resource.info`를 제공하지 않는다.
 - `resource.info`를 끄면 호스트가 빈 목록을 보내고, 덱 위젯은 흐려지며 `--`를 표시한다.
 
 | 리소스 | ID | 출처 |
@@ -351,7 +351,7 @@ toss-connector allow command.run                     # 덱에 실행 권한 부�
 | 팬 | `fan.N` | hwmon의 `fan*_input`(GPU 팬은 `gpu.fan`) |
 | 배터리 | `battery` | `/sys/class/power_supply` |
 
-시스템에 존재하는 장치만 목록에 나온다(GPU가 없으면 GPU 항목 없음). 현재 PC에서 잡히는 항목을 확인하려면 `cd app/meter && cargo run --example show`를 실행하면 된다.
+시스템에 존재하는 장치만 목록에 나온다(GPU가 없으면 GPU 항목 없음). 현재 PC에서 잡히는 항목을 확인하려면 `cd src/app/meter && cargo run --example show`를 실행하면 된다.
 
 ### 대용량 바이너리 (`blob`)
 
@@ -484,10 +484,10 @@ toss-connector allow command.run                     # 덱에 실행 권한 부�
 **로그인한 사용자 세션에서** 실행해야 한다(미디어 플레이어는 사용자 세션 D-Bus에 뜨기 때문에 시스템 서비스에서는 보이지 않음).
 
 ```bash
-nix build .#toss-connector && ./result/bin/toss-connector
+nix build .#toss-connector -o dist/toss-connector && ./dist/toss-connector/bin/toss-connector
 ```
 
-개발 중에는 `cd app/host && nix develop -c cargo run`. NixOS에서는 모듈로 설치해 사용자 서비스로 자동 실행한다(아래 "NixOS에 설치" 참고).
+개발 중에는 `cd src/app/host && nix develop -c cargo run`. NixOS에서는 모듈로 설치해 사용자 서비스로 자동 실행한다(아래 "NixOS에 설치" 참고).
 
 | 명령어 | 동작 |
 |---|---|
@@ -534,7 +534,7 @@ nix build .#toss-connector && ./result/bin/toss-connector
 | `src/media.rs` | 미디어 플레이어. OS 종속 부분이 여기서 분기된다. 현재는 리눅스(MPRIS, D-Bus)만 구현. 덱에 다시 보낼지의 판정(`changed`)도 여기 있다 |
 | `src/art.rs` | 앨범 아트를 가져와(파일, http/https) 512px 안으로 축소 |
 | `src/managed.rs` | 관리형 설정(`/etc/toss-connector/managed.json`): 파싱과 검증, 사용자 설정 위에 덮어씌우는 규칙(strict) |
-| `src/meter.rs` | PC 리소스를 측정해 덱으로 보내는 스레드: 덱이 구독 중인 항목만, 바뀐 값만. 측정 자체는 `app/meter`(덱과 공용인 크레이트)가 담당 |
+| `src/meter.rs` | PC 리소스를 측정해 덱으로 보내는 스레드: 덱이 구독 중인 항목만, 바뀐 값만. 측정 자체는 `src/app/meter`(덱과 공용인 크레이트)가 담당 |
 | `src/console.rs` | 웹 콘솔: 정적 파일을 서빙하고 API를 받는 작은 HTTP 서버, 토큰과 Origin 검증, 콘솔에서 진행하는 페어링 |
 | `console/` | 웹 콘솔의 프론트엔드(정적 파일 3개). 빌드 시 바이너리에 내장 |
 
@@ -627,7 +627,7 @@ programs.toss-connector = {
 - **조회 방법**: `toss-connector managed`로 현재 적용된 관리형 설정을 확인한다. `toss-connector trust`, `command list`, 웹 콘솔에서는 잠긴 항목에 `Nix` 태그가 붙는다.
 - 손상되거나 읽을 수 없는 파일이 놓이면 **전체 거부 strict 모드로 폴백한다**(설정 파일이 깨졌다고 잠금이 풀리는 것을 방지). 빌드 시 검증을 거치므로 정상 환경에서는 발생하지 않으며, 실패 시 로그에 1회 경고를 남긴다(복구 후 다시 깨지면 재기록).
 - 시스템 전역(`/etc`) 설정이므로 해당 PC의 모든 사용자에게 동일하게 적용된다.
-- 관련 코드: `app/host/src/managed.rs`(파싱, 검증, 병합 규칙), `nix/nixos-module.nix`(모듈 옵션 및 JSON 생성).
+- 관련 코드: `src/app/host/src/managed.rs`(파싱, 검증, 병합 규칙), `nix/nixos-module.nix`(모듈 옵션 및 JSON 생성).
 
 ### 웹 콘솔
 
@@ -638,7 +638,7 @@ toss-connector                 # 실행해 두면 콘솔도 함께 기동 (http:
 toss-connector console         # 브라우저로 열기 (토큰 자동 첨부)
 ```
 
-**프론트엔드는 정적 파일 묶음이다**(`app/host/console/`의 `index.html`, `app.js`, `style.css`. 프레임워크나 빌드 단계 없음). 서빙 방식은 두 가지 중 하나다.
+**프론트엔드는 정적 파일 묶음이다**(`src/app/host/console/`의 `index.html`, `app.js`, `style.css`. 프레임워크나 빌드 단계 없음). 서빙 방식은 두 가지 중 하나다.
 
 | | 기본 | 선택 |
 |---|---|---|
@@ -672,9 +672,9 @@ toss-connector console         # 브라우저로 열기 (토큰 자동 첨부)
 | `POST /api/commands/<id>/run`, `set`, `GET …/state` | PC에서 즉시 실행, 값 설정 테스트, 현재 상태 조회 |
 | `POST /api/pair`, `/api/pair/confirm`, `/api/pair/cancel` | 페어링 시작(`{"addr": …}`), 검증 코드 확인, 취소. 진행 상태는 `/api/state`의 `pairing`으로 확인 |
 
-실패 시 `{"error": "사유"}`와 함께 4xx/5xx 상태 코드를 반환한다: 토큰 불일치 401, Host/Origin 검증 실패 403, 대상 덱/명령 없음 404, 요청 형식 오류 400, Nix 관리형 설정 충돌 409, 파일 I/O 또는 커맨드 실행 실패 500. `set`은 커맨드 실행이 실패로 끝나도 500을 반환한다. 정본은 `app/host/src/console.rs` 상단 주석에 있다.
+실패 시 `{"error": "사유"}`와 함께 4xx/5xx 상태 코드를 반환한다: 토큰 불일치 401, Host/Origin 검증 실패 403, 대상 덱/명령 없음 404, 요청 형식 오류 400, Nix 관리형 설정 충돌 409, 파일 I/O 또는 커맨드 실행 실패 500. `set`은 커맨드 실행이 실패로 끝나도 500을 반환한다. 정본은 `src/app/host/src/console.rs` 상단 주석에 있다.
 
-웹 콘솔에서 진행하는 페어링도 CLI `pair`와 동일한 상태 머신(`app/host/src/pairing.rs`)을 타므로, 사용자가 검증 코드를 확인하기 전에는 덱이 완료 신호를 보내도 저장하지 않는다.
+웹 콘솔에서 진행하는 페어링도 CLI `pair`와 동일한 상태 머신(`src/app/host/src/pairing.rs`)을 타므로, 사용자가 검증 코드를 확인하기 전에는 덱이 완료 신호를 보내도 저장하지 않는다.
 
 ### 참고 사항
 
@@ -720,7 +720,7 @@ toss-connector console         # 브라우저로 열기 (토큰 자동 첨부)
 - **덱이 표시 중인 메트릭을 호스트에 구독 요청한다(`watch`).** 데몬이 레이아웃 내 리소스 미터 위젯들이 고른 항목을 호스트별로 집계해(`Layout::watched`), 호스트 연결 시와 레이아웃 변경 시 전송한다. 덱 자체 리소스 위젯 항목은 데몬이 직접 측정한다.
 - **스위치와 노브는 사용자 조작 결과를 낙관적으로 선표시한다.** 값을 설정한 뒤 1.5초 동안은 사용자가 선택한 값을 보여 주다가 이후 다시 호스트가 보고한 값으로 복귀한다. 그사이에 호스트가 새 값을 알려 오면 그대로 이어받고, 변화가 없으면(커맨드 실행 실패 등) 기존 값으로 돌아간다. 연속 노브는 드래그 중 0.09초 스로틀링으로 전송하고, 손을 뗄 때 최종값을 한 번 더 전송한다. **위젯은 `host.caps`를 확인해 미허용 액션을 호출하는 컨트롤을 비활성화한다.**
 - **위젯마다 대상 호스트를 지정한다.** 위젯 설정 `host`에 호스트 ID가 지정돼 있으면 해당 호스트만 추적·제어한다(미연결 시 오프라인으로 표시). 비어 있으면 연결된 첫 호스트를 따른다. 추가 시 선택한다([03-userland-guide.md](03-userland-guide.md) 3.16절 "레이아웃 편집").
-- 관련 코드(`app/tossd/src/hosts/`): `session.rs`(단일 세션 — 헬로, 수락 판정, 메시지 수신), `pairing.rs`(페어링 모드·후보·상호 확인), `blob.rs`(청크 기반 앨범 아트 조립), `store.rs`(`hosts.json`과 `key`), `mod.rs`(호스트 상태 `Hosts`, UI 전달 모델, 액션 라우팅). 변경 사항은 `Events`(`hosts`, `values`, `meters`, `result`, `sleep`)로 데몬 코어에 전달하며 `app/tossd/src/state.rs`의 `Shared`가 받아 UI로 푸시한다.
+- 관련 코드(`src/app/tossd/src/hosts/`): `session.rs`(단일 세션 — 헬로, 수락 판정, 메시지 수신), `pairing.rs`(페어링 모드·후보·상호 확인), `blob.rs`(청크 기반 앨범 아트 조립), `store.rs`(`hosts.json`과 `key`), `mod.rs`(호스트 상태 `Hosts`, UI 전달 모델, 액션 라우팅). 변경 사항은 `Events`(`hosts`, `values`, `meters`, `result`, `sleep`)로 데몬 코어에 전달하며 `src/app/tossd/src/state.rs`의 `Shared`가 받아 UI로 푸시한다.
 - 덱 측 로그는 `/var/log/tossd.log`의 `host:` 접두사 라인이다(페어링, 연결, 종료, 거절, 권한 변경, 액션 실패). 재생 정보 같은 상태 페이로드는 남기지 않는다.
 
 ## 4.12 확장 가이드
@@ -734,10 +734,10 @@ toss-connector console         # 브라우저로 열기 (토큰 자동 첨부)
 - 자주 변하는 메트릭은 **덱이 구독한 항목만** 측정하고(`watch`), 표시 자릿수 기준으로 반올림해 달라진 값만 보낸다.
 - 갱신 빈도가 높은 작은 값은 무거운 상태 객체와 메시지를 분리한다(스위치·노브 값, 메트릭 수치는 `hosts`와 별도 메시지로 UI 전달).
 
-1. 프로토콜(`app/proto/src/lib.rs`)의 `HostMsg`에 새 메시지와 데이터 구조체를 추가한다.
+1. 프로토콜(`src/app/proto/src/lib.rs`)의 `HostMsg`에 새 메시지와 데이터 구조체를 추가한다.
 2. **해당 데이터를 덱에 노출해도 되는지 제어하는 권한을 추가한다**(아래 "권한(capability) 추가" 참고).
-3. 호스트(`app/host`): OS 종속 조회 로직을 트레이트 + OS별 모듈로 분리하고(`media.rs` 패턴), `src/session.rs`에 상태 피드를 추가한다(`MediaFeed`, `CommandFeed`, `MeterFeed` 구조 참고: 각 피드가 직전 전송값을 기억해 `poll` 시 변경분만 전송하고 `Session::turn`이 이를 호출).
-4. 덱(`app/tossd/src/hosts/session.rs`): `serve`에서 수신해 `HostInfo`(`hosts/mod.rs`)에 반영하고, `Changed`를 반환하면 UI로 푸시된다. 갱신 빈도가 높은 값이면 `HostInfo`와 분리해 별도 채널로 전달한다(`Events`의 `values`, `meters` 방식).
+3. 호스트(`src/app/host`): OS 종속 조회 로직을 트레이트 + OS별 모듈로 분리하고(`media.rs` 패턴), `src/session.rs`에 상태 피드를 추가한다(`MediaFeed`, `CommandFeed`, `MeterFeed` 구조 참고: 각 피드가 직전 전송값을 기억해 `poll` 시 변경분만 전송하고 `Session::turn`이 이를 호출).
+4. 덱(`src/app/tossd/src/hosts/session.rs`): `serve`에서 수신해 `HostInfo`(`hosts/mod.rs`)에 반영하고, `Changed`를 반환하면 UI로 푸시된다. 갱신 빈도가 높은 값이면 `HostInfo`와 분리해 별도 채널로 전달한다(`Events`의 `values`, `meters` 방식).
 5. UI: 위젯 QML에서 `host` 프로퍼티를 참조한다(분리 채널 값은 `shell/WidgetSlot`에서 바인딩해 전달).
 
 ### 덱에서 새 액션 추가 (예: 볼륨 조절)
@@ -749,27 +749,27 @@ toss-connector console         # 브라우저로 열기 (토큰 자동 첨부)
 ### 권한(capability) 추가
 
 1. 프로토콜에 `CAP_*` 상수를 추가한다.
-2. `app/host/src/trust.rs`의 `PERMISSIONS` 테이블에 항목을 추가한다(ID, 설명, 기본값). **PC 시스템을 변경하거나 제어하는 권한은 기본값을 거부로 둔다.**
-3. `app/host/src/session.rs`의 `can` 계산 로직에 "현재 PC 환경에서 실제 실행 가능한지" 조건을 추가한다.
+2. `src/app/host/src/trust.rs`의 `PERMISSIONS` 테이블에 항목을 추가한다(ID, 설명, 기본값). **PC 시스템을 변경하거나 제어하는 권한은 기본값을 거부로 둔다.**
+3. `src/app/host/src/session.rs`의 `can` 계산 로직에 "현재 PC 환경에서 실제 실행 가능한지" 조건을 추가한다.
 4. 덱 UI에서 해당 액션을 보내는 컨트롤이 `host.caps`를 보고 비활성화되도록 처리하고, `DevicePage`의 `capText`에 표시용 라벨을 추가한다.
 5. 웹 콘솔, CLI, NixOS 모듈 검증(`permissions`)은 `PERMISSIONS` 테이블을 참조하므로 별도 수정이 필요 없다. 이 문서 4.5절 표와 `nix/nixos-module.nix` 옵션 설명에만 추가하면 된다.
 
 ### 신규 OS 지원 (Windows, macOS)
 
-`app/host/src/media.rs`의 `open()`에 해당 OS용 백엔드를 추가한다. `MediaControl` 트레이트 메서드 3종(`poll`: 현재 재생 상태·아트 URL 조회, `action`: 제어 실행, `on_change`: 변경 알림 콜백 등록 — 알림 API가 없으면 빈 구현으로도 2초 폴링으로 동작)을 구현하면 된다. 변경 판정(`changed`)과 앨범 아트 리사이징 로직은 OS 무관 공용이다.
+`src/app/host/src/media.rs`의 `open()`에 해당 OS용 백엔드를 추가한다. `MediaControl` 트레이트 메서드 3종(`poll`: 현재 재생 상태·아트 URL 조회, `action`: 제어 실행, `on_change`: 변경 알림 콜백 등록 — 알림 API가 없으면 빈 구현으로도 2초 폴링으로 동작)을 구현하면 된다. 변경 판정(`changed`)과 앨범 아트 리사이징 로직은 OS 무관 공용이다.
 
 ### 테스트 및 검증
 
 | 대상 | 명령어 및 검증 내용 |
 |---|---|
-| 프로토콜, 암호화 | `cd app/proto && nix develop -c cargo test` (메시지 직렬화, 양쪽 검증 코드 일치, 평문 미노출, 잘못된 키 길이 거부) |
-| 호스트 커넥터 | `cd app/host && nix develop -c cargo test` (권한 규칙, 원자적 저장·손상 파일 보호, 목 덱 연동 및 런타임 권한 변경, 미페어링 피어 무응답, 프로토콜 버전 불일치, 페어링 흐름, 명령·스위치·노브, 손상 명령 파일 검증, 리소스, 느린 플레이어 환경 ping 유지, NixOS 관리형 설정, 웹 콘솔 API·보안 검증, CLI 인자 파싱) |
-| 리소스 측정 | `cd app/meter && nix develop -c cargo test` (현재 PC 실측 검증). `cargo run --example show`로 인식 항목 확인 |
-| 덱 데몬 | `cd app/tossd && nix develop -c cargo test` (목 호스트 연동 및 페어링 전체 흐름, 미등록 키 거부 및 `hello` 처리, 버전 불일치 호스트, UI 검증 코드 불일치 수락 거부, `paired` 직후 연결 종료 처리, 상태·액션 송수신, 타 호스트 응답 격리, 리소스 및 구독) |
+| 프로토콜, 암호화 | `cd src/app/proto && nix develop -c cargo test` (메시지 직렬화, 양쪽 검증 코드 일치, 평문 미노출, 잘못된 키 길이 거부) |
+| 호스트 커넥터 | `cd src/app/host && nix develop -c cargo test` (권한 규칙, 원자적 저장·손상 파일 보호, 목 덱 연동 및 런타임 권한 변경, 미페어링 피어 무응답, 프로토콜 버전 불일치, 페어링 흐름, 명령·스위치·노브, 손상 명령 파일 검증, 리소스, 느린 플레이어 환경 ping 유지, NixOS 관리형 설정, 웹 콘솔 API·보안 검증, CLI 인자 파싱) |
+| 리소스 측정 | `cd src/app/meter && nix develop -c cargo test` (현재 PC 실측 검증). `cargo run --example show`로 인식 항목 확인 |
+| 덱 데몬 | `cd src/app/tossd && nix develop -c cargo test` (목 호스트 연동 및 페어링 전체 흐름, 미등록 키 거부 및 `hello` 처리, 버전 불일치 호스트, UI 검증 코드 불일치 수락 거부, `paired` 직후 연결 종료 처리, 상태·액션 송수신, 타 호스트 응답 격리, 리소스 및 구독) |
 | NixOS 모듈 | `nix flake check` (모듈 활성화 NixOS 평가 결과 서비스 유닛 구조 및 `config` 생성 JSON 검증) |
-| 실기기 연동 | `scripts/app-push.sh all`로 배포 후 PC에서 `toss-connector` 실행. UI는 `grim`으로 캡처, 터치 조작은 `scripts/tf-tap.sh` |
+| 실기기 연동 | `src/scripts/app-push.sh all`로 배포 후 PC에서 `toss-connector` 실행. UI는 `grim`으로 캡처, 터치 조작은 `src/scripts/tf-tap.sh` |
 
-`nix build .#toss-connector`는 호스트 테스트를, 기기 이미지 빌드(`scripts/build-all.sh`)는 덱 데몬 테스트를 빌드 도중 자동 실행한다. 하나라도 실패하면 빌드도 중단된다.
+`nix build .#toss-connector`는 호스트 테스트를, 기기 이미지 빌드(`src/scripts/build-all.sh`)는 덱 데몬 테스트를 빌드 도중 자동 실행한다. 하나라도 실패하면 빌드도 중단된다.
 
 ## 4.13 현재 범위와 남은 과제
 
@@ -853,7 +853,7 @@ toss-connector console         # 브라우저로 열기 (토큰 자동 첨부)
 기기가 PC에 표준 USB HID 키보드로 인식되게 하는 방식이다. PC에 어떤 소프트웨어도 설치할 필요가 없어 아무 PC에 꽂아도 바로 동작하며, 일반 스트림덱과 비슷한 사용감을 낸다.
 
 - 커널에는 이미 HID 가젯 드라이버(`f_hid`)를 내장해 두었다.
-- 현재 USB 가젯은 `os/initramfs/init`의 `setup_gadget()`이 구성한다(RNDIS + ACM). 여기에 HID function을 하나 더 추가하면 된다: `functions/hid.usb0`에 `protocol`, `subclass`, `report_length`, `report_desc`(키보드 리포트 디스크립터)를 설정하고 config에 심볼릭 링크로 묶는다.
+- 현재 USB 가젯은 `src/os/initramfs/init`의 `setup_gadget()`이 구성한다(RNDIS + ACM). 여기에 HID function을 하나 더 추가하면 된다: `functions/hid.usb0`에 `protocol`, `subclass`, `report_length`, `report_desc`(키보드 리포트 디스크립터)를 설정하고 config에 심볼릭 링크로 묶는다.
 - 구성이 끝나면 기기에 `/dev/hidg0` 노드가 생기며, 8바이트 키보드 리포트 패킷을 write하면 PC로 키 입력이 전달된다.
 - 가젯 구성을 변경하면 USB 재열거가 일어나므로 SSH가 한 번 끊긴다. initramfs 수정 사항이므로 부트 이미지를 다시 플래싱해야 한다.
 

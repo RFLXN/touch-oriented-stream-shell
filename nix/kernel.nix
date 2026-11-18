@@ -3,8 +3,8 @@
 #   kernel   `Image`, 설정(`config`), 내장 모듈 목록(`modules.builtin`), 버전(`kernel.release`)
 #   dtb      `rk3399-toss-front.dtb`
 #
-# 빌드 절차는 `os/kernel/kbuild.sh`에 정의되어 있으며, 증분 개발 빌드(`scripts/build-kernel.sh`)도 같은 스크립트를 공유한다.
-# 커널 빌드 입력은 `nixpkgs` 커널 소스와 `os/kernel/`의 `kbuild.sh`, `toss-front.config`, `drivers/`뿐이고,
+# 빌드 절차는 `src/os/kernel/kbuild.sh`에 정의되어 있으며, 증분 개발 빌드(`src/scripts/build-kernel.sh`)도 같은 스크립트를 공유한다.
+# 커널 빌드 입력은 `nixpkgs` 커널 소스와 `src/os/kernel/`의 `kbuild.sh`, `toss-front.config`, `drivers/`뿐이고,
 # 디바이스 트리 입력은 `kbuild.sh`와 `dts/`뿐이므로 다른 파일을 수정해도 불필요하게 재빌드되지 않는다.
 # 설정 조각(`toss-front.config`)이 경고 없이 그대로 반영되지 않으면 커널 빌드를 실패 처리한다.
 #
@@ -39,7 +39,7 @@ let
     dontFixup = true;
   };
   kbuildInit = kdir: ''
-    KSRC=$PWD KOUT=$PWD/../out KDIR=${kdir}/os/kernel JOBS=$NIX_BUILD_CORES
+    KSRC=$PWD KOUT=$PWD/../out KDIR=${kdir}/src/os/kernel JOBS=$NIX_BUILD_CORES
     source $KDIR/kbuild.sh
   '';
 
@@ -51,9 +51,9 @@ let
         ${kbuildInit (
           only (
             fs.unions [
-              ../os/kernel/kbuild.sh
-              ../os/kernel/toss-front.config
-              ../os/kernel/drivers
+              ../src/os/kernel/kbuild.sh
+              ../src/os/kernel/toss-front.config
+              ../src/os/kernel/drivers
             ]
           )
         )}
@@ -80,8 +80,8 @@ let
         ${kbuildInit (
           only (
             fs.unions [
-              ../os/kernel/kbuild.sh
-              ../os/kernel/dts
+              ../src/os/kernel/kbuild.sh
+              ../src/os/kernel/dts
             ]
           )
         )}
