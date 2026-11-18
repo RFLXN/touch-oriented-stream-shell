@@ -3,7 +3,8 @@
 //!   - 호스트 상태를 이벤트 기반으로 덱에 전송: 재생 정보·앨범 아트, 등록된 명령 목록과 스위치·노브 값,
 //!     측정 가능한 리소스 목록과 덱이 구독 중인 리소스 값.
 //!     재생 중 경과 시간은 보내지 않고 덱이 자체 계산하며, 전송 여부는 호스트가 판단한다(media::changed).
-//!   - 덱의 액션 요청 처리: 미디어 제어, 등록된 명령 실행 및 값 설정(덱은 등록 목록 중에서만 선택 가능).
+//!   - 덱의 액션 요청 처리: 미디어 제어, 등록된 명령 실행 및 값 설정(덱은 등록 목록 중에서만 선택 가능), 웹페이지 열기(`web.rs`).
+//!   - 웹 콘솔과 CLI의 덱 금고 요청 중계(`vault.rs`): 덱에 보내고 응답을 요청한 쪽에 돌려주며, 덱이 알려 준 금고 상태를 기록한다.
 //!
 //! 모든 작업은 해당 덱의 권한(Policy) 내에서만 수행한다.
 //! 특히 액션 처리 시 매 요청마다 설정 파일을 새로 읽어 권한을 검증해, 방금 해제한 권한이 실행되는 틈을 막는다.
@@ -22,14 +23,17 @@ use std::time::{Duration, Instant};
 
 use base64::Engine;
 use toss_proto::secure::{Conn, MAX_PLAIN};
-use toss_proto::{CommandInfo, DeckMsg, HostMsg, Media, ACTION_COMMAND_RUN, ACTION_COMMAND_SET, BLOB_CHUNK, CAP_COMMAND_RUN, CAP_MEDIA_CONTROL, CAP_MEDIA_INFO, CAP_RESOURCE_INFO, ERROR_NOT_ALLOWED};
+use toss_proto::{
+    CommandInfo, DeckMsg, HostMsg, Media, VaultService, ACTION_COMMAND_RUN, ACTION_COMMAND_SET, ACTION_WEB_OPEN, BLOB_CHUNK, CAP_COMMAND_RUN, CAP_MEDIA_CONTROL, CAP_MEDIA_INFO, CAP_RESOURCE_INFO, CAP_WEB_OPEN,
+    ERROR_NOT_ALLOWED,
+};
 
 use crate::commands::{self, Commands};
 use crate::link::{explain, start_pings, why_lost, Attached};
 use crate::media::MediaControl;
 use crate::store::Store;
 use crate::trust::{self, Choices};
-use crate::{art, jsonfile, managed, media, meter};
+use crate::{art, jsonfile, managed, media, meter, vault, web};
 
 /// 권한 설정 및 명령 목록 파일 변경 확인 주기
 const POLL_EVERY: Duration = Duration::from_millis(500);
@@ -46,6 +50,7 @@ pub fn can(has_media: bool, cap: &str) -> bool {
         CAP_MEDIA_INFO | CAP_MEDIA_CONTROL => has_media,
         CAP_COMMAND_RUN => true,
         CAP_RESOURCE_INFO => cfg!(target_os = "linux"),
+        CAP_WEB_OPEN => cfg!(any(target_os = "linux", target_os = "macos")),
         _ => false,
     }
 }
@@ -114,6 +119,12 @@ enum Wake {
     Watch(Vec<String>),
     /// 리소스 측정 스레드 이벤트 (카탈로그 또는 값 변경)
     Meter(meter::Event),
+    /// 웹 콘솔이나 CLI가 보낸 금고 요청 (덱에 전달하고 응답을 기다린다)
+    Vault(vault::Call),
+    /// 금고 요청에 대한 덱의 응답 (요청 번호, 결과)
+    VaultReply(u64, Result<serde_json::Value, String>),
+    /// 덱이 알려 준 금고 상태
+    VaultState(Vec<VaultService>),
     /// 수신 스레드 종료(연결 끊김)
     Ended,
 }
@@ -373,6 +384,9 @@ struct Session<'a> {
     meters: MeterFeed,
     next_poll: Instant,
     next_read: Instant,
+    /// 덱의 응답을 기다리는 금고 요청 (요청 번호 -> 응답 채널)
+    vault_calls: HashMap<u64, Sender<Result<serde_json::Value, String>>>,
+    next_vault: u64,
 }
 
 impl Session<'_> {
@@ -390,6 +404,10 @@ impl Session<'_> {
         }
         let done = match name {
             ACTION_COMMAND_RUN | ACTION_COMMAND_SET => self.commands.act(name, args),
+            ACTION_WEB_OPEN => {
+                let url = args["url"].as_str().unwrap_or_default();
+                web::open(url).inspect(|()| eprintln!("웹페이지 열기: {url}"))
+            }
             _ => match self.media.as_mut() {
                 Some(m) => m.action(name, args),
                 None => Err("현재 호스트에서 지원하지 않는 액션입니다".to_string()),
@@ -414,6 +432,18 @@ impl Session<'_> {
             Ok(Wake::Value(id, value)) => self.commands.on_value(id, value, &self.conn)?,
             Ok(Wake::Watch(ids)) => self.meters.on_watch(ids),
             Ok(Wake::Meter(event)) => self.meters.on_event(event, &self.conn)?,
+            Ok(Wake::Vault(call)) => {
+                let id = self.next_vault;
+                self.next_vault += 1;
+                self.conn.send(&HostMsg::Vault { id, op: call.op, service: call.service, args: call.args })?;
+                self.vault_calls.insert(id, call.reply);
+            }
+            Ok(Wake::VaultReply(id, got)) => {
+                if let Some(reply) = self.vault_calls.remove(&id) {
+                    let _ = reply.send(got);
+                }
+            }
+            Ok(Wake::VaultState(services)) => vault::set_state(&self.conn.remote, services),
             Ok(Wake::Ended) | Err(RecvTimeoutError::Disconnected) => return Ok(Some(String::new())),
             Err(RecvTimeoutError::Timeout) => {}
         }
@@ -456,6 +486,8 @@ pub fn session(a: Attached, media: &mut Option<Box<dyn MediaControl>>, store: &S
             let wake = match read_conn.recv::<DeckMsg>(&mut reader) {
                 Ok(Some(DeckMsg::Action { id, name, args })) => Wake::Action(id, name, args),
                 Ok(Some(DeckMsg::Watch { metrics })) => Wake::Watch(metrics.into_iter().filter(|m| m.len() <= 64).take(256).collect()),
+                Ok(Some(DeckMsg::VaultReply { id, ok, error, data })) => Wake::VaultReply(id, if ok { Ok(data) } else { Err(error.chars().filter(|c| !c.is_control()).take(300).collect()) }),
+                Ok(Some(DeckMsg::VaultState { services })) => Wake::VaultState(services.into_iter().take(16).collect()),
                 Ok(Some(DeckMsg::Denied { reason })) => break explain(&reason).to_string(),
                 Ok(_) => continue,
                 Err(e) => break why_lost(&e),
@@ -476,8 +508,23 @@ pub fn session(a: Attached, media: &mut Option<Box<dyn MediaControl>>, store: &S
         })));
     }
 
+    let line = Mutex::new(tx.clone());
+    vault::attach(Box::new(move |call| line.lock().unwrap().send(Wake::Vault(call)).is_ok()));
     let commands = CommandFeed::new(store.commands());
-    let mut s = Session { conn, tx, policy, media, caps, playing: MediaFeed::default(), commands, meters: MeterFeed::default(), next_poll: Instant::now(), next_read: Instant::now() };
+    let mut s = Session {
+        conn,
+        tx,
+        policy,
+        media,
+        caps,
+        playing: MediaFeed::default(),
+        commands,
+        meters: MeterFeed::default(),
+        next_poll: Instant::now(),
+        next_read: Instant::now(),
+        vault_calls: HashMap::new(),
+        next_vault: 1,
+    };
     let result = loop {
         match s.turn(rx.recv_timeout(s.wait())) {
             Ok(None) => {}
@@ -485,6 +532,10 @@ pub fn session(a: Attached, media: &mut Option<Box<dyn MediaControl>>, store: &S
             Err(e) => break why_lost(&e),
         }
     };
+    vault::detach();
+    for (_, reply) in s.vault_calls.drain() {
+        let _ = reply.send(Err("덱 연결이 끊어졌습니다".into()));
+    }
     alive.store(false, Ordering::SeqCst);
     if let Some(m) = s.media.as_mut() {
         m.on_change(None);

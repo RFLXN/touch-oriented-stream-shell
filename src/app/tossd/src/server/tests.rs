@@ -121,9 +121,9 @@ impl Host {
         }
     }
 
-    /// 덱이 보낸 다음 메시지(`Ping`과 `Watch`는 건너뜀)
+    /// 덱이 보낸 다음 메시지(`Ping`, `Watch`, `VaultState`는 건너뜀)
     fn next(&mut self) -> DeckMsg {
-        self.next_that(|m| (!matches!(m, DeckMsg::Ping | DeckMsg::Watch { .. })).then_some(m))
+        self.next_that(|m| (!matches!(m, DeckMsg::Ping | DeckMsg::Watch { .. } | DeckMsg::VaultState { .. })).then_some(m))
     }
 
     fn next_watch(&mut self) -> Vec<String> {
@@ -396,4 +396,62 @@ fn slow_handshake_is_accepted() {
     let (mut ws, _) = tungstenite::client(url.as_str(), stream).unwrap();
     let Message::Text(t) = ws.read().unwrap() else { panic!("텍스트 메시지가 아님") };
     assert!(t.as_str().contains(r#""type":"hello""#));
+}
+
+/// 페어링된 호스트가 금고를 쓰려 하면 화면이 묻고, 허용·해제·삭제가 호스트와 화면 양쪽에 반영된다. 키 값은 어느 쪽에도 나가지 않는다.
+#[test]
+fn the_vault_asks_the_screen_and_tells_both_sides() {
+    let (host_addr, dir) = host_side("vault");
+    let url = start(layout::Store::default(), Some((host_addr, dir.clone())));
+    let mut ui = connect(&url);
+    let me = Identity::generate().unwrap();
+    say(&mut ui, json!({ "type": "pair_start" }));
+    next_when(&mut ui, "hosts", |v| v["pairing"]["active"] == true);
+    let mut host = Host::attach(host_addr, &me, hello(true));
+    host.send(HostMsg::PairConfirm);
+    next_when(&mut ui, "hosts", |v| v["pairing"]["candidate"]["host_confirmed"] == true);
+    say(&mut ui, json!({ "type": "pair_accept", "code": host.conn.code }));
+    assert_eq!(host.next(), DeckMsg::Paired);
+    let vault_state = |host: &mut Host| host.next_that(|m| match m {
+        DeckMsg::VaultState { services } => Some(services),
+        _ => None,
+    });
+    let reply = |host: &mut Host| host.next_that(|m| match m {
+        DeckMsg::VaultReply { id, ok, error, data } => Some((id, ok, error, data)),
+        _ => None,
+    });
+
+    assert!(!vault_state(&mut host)[0].registered);
+    let put = json!({ "client_id": "123", "client_secret": "never-shown", "redirect_uri": "" });
+    host.send(HostMsg::Vault { id: 1, op: "put".into(), service: "discord".into(), args: put });
+    let v = next_when(&mut ui, "vault", |v| v["asking"].is_object());
+    assert_eq!((&v["asking"]["host"], &v["asking"]["name"], &v["asking"]["title"]), (&Value::from(me.id()), &Value::from("pc"), &Value::from("Discord")));
+    say(&mut ui, json!({ "type": "vault_answer", "allow": true }));
+    assert_eq!(reply(&mut host), (1, true, String::new(), json!({ "ok": true })));
+    let v = next_when(&mut ui, "vault", |v| v["services"][0]["registered"] == true && v["asking"].is_null());
+    assert_eq!(v["services"][0]["hosts"], json!([me.id()]));
+    assert!(!v.to_string().contains("never-shown"));
+    let s = loop {
+        let s = vault_state(&mut host);
+        if s[0].registered && s[0].allowed {
+            break s;
+        }
+    };
+    assert!(!s[0].linked);
+
+    host.send(HostMsg::Vault { id: 2, op: "begin".into(), service: "discord".into(), args: Value::Null });
+    let (_, ok, _, data) = reply(&mut host);
+    assert!(ok && data["client_id"] == "123" && !data.to_string().contains("never-shown"));
+    host.send(HostMsg::Vault { id: 3, op: "token".into(), service: "discord".into(), args: Value::Null });
+    assert_eq!(reply(&mut host), (3, false, "not_linked".into(), Value::Null));
+
+    say(&mut ui, json!({ "type": "vault_revoke", "service": "discord", "host": me.id() }));
+    while vault_state(&mut host)[0].allowed {}
+    say(&mut ui, json!({ "type": "vault_forget", "service": "discord" }));
+    next_when(&mut ui, "vault", |v| v["services"][0]["registered"] == false);
+    host.send(HostMsg::Vault { id: 4, op: "begin".into(), service: "discord".into(), args: Value::Null });
+    next_when(&mut ui, "vault", |v| v["asking"].is_object());
+    host.conn.shutdown();
+    next_when(&mut ui, "vault", |v| v["asking"].is_null());
+    let _ = std::fs::remove_dir_all(&dir);
 }

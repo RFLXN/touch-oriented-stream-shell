@@ -8,7 +8,8 @@
 //!   server.rs    화면 연결 관리: 수신한 요청을 처리하고 변경된 상태 전송
 //!   state.rs     모든 화면이 공유하는 상태 및 이를 갱신하는 워커 스레드
 //!   layout/      배치 관리: 페이지, 랙, 위젯과 규칙, 카탈로그, 편집, 저장
-//!   hosts/       호스트(PC) 연결 수락 및 페어링(프로토콜은 `src/app/proto`, `toss-proto` 크레이트)
+//!   hosts/       호스트(PC) 연결 수락 및 페어링, 외부 연동 키 보관(금고)(프로토콜은 `src/app/proto`, `toss-proto` 크레이트)
+//!   icons.rs     웹페이지 아이콘 버튼이 표시할 사이트 아이콘 가져오기와 보관
 //!   wifi.rs      Wi-Fi 스캔 및 연결(`wpa_supplicant` 제어)
 //!   device.rs    덱 자체 제어: 화면 밝기, 전원 종료, 절전, SSH(root 권한이 필요한 작업은 `toss-helper`에 위임)
 //!   sys.rs       시스템 상태 조회(호스트명, IP 주소, 네트워크 인터페이스)
@@ -16,6 +17,7 @@
 
 mod device;
 mod hosts;
+mod icons;
 mod layout;
 mod persist;
 mod server;

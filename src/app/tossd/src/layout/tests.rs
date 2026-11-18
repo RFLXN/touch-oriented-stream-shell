@@ -324,3 +324,21 @@ fn the_layout_survives_a_restart_and_a_broken_file_is_set_aside() {
     assert!(!dir.join("layout.json").exists());
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn web_buttons_take_only_web_addresses_and_icons_are_wanted_once() {
+    let mut l = default_layout();
+    l.edit(&Edit::Add { what: "rack".into(), page: 0, settings: Map::new() }).unwrap();
+    l.edit(&Edit::Resize { id: 1, w: 2, h: 2 }).unwrap();
+    let put = |x: u32, y: u32, what: &str, url: &str| Edit::Put { rack: 1, x, y, what: what.into(), settings: serde_json::from_value(serde_json::json!({ "host": "pc1", "url": url })).unwrap() };
+    for bad in ["file:///etc/passwd", "javascript:alert(1)", "https://", "https:///x", "http://a b", "ftp://example.com", &format!("https://{}", "a".repeat(URL_MAX))] {
+        assert!(l.edit(&put(0, 0, "web.button", bad)).is_err(), "{bad}");
+    }
+    l.edit(&put(0, 0, "web.button", " https://example.com/a ")).unwrap();
+    l.edit(&put(1, 0, "web.icon", "https://example.com/")).unwrap();
+    l.edit(&put(0, 1, "web.icon", "https://example.com/")).unwrap();
+    l.edit(&put(1, 1, "web.icon", "http://other.example")).unwrap();
+    assert_eq!(widget_of(&l, 3).unwrap().settings["url"], "https://example.com/a");
+    assert_eq!(l.icon_urls(), ["https://example.com/", "http://other.example"]);
+    assert!(l.edit(&Edit::Add { what: "web.icon".into(), page: 0, settings: Map::new() }).is_err());
+}

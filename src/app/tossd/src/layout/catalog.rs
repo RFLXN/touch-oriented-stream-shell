@@ -48,6 +48,7 @@ pub struct SettingInfo {
     ///            `filter`가 지정되면 해당 종류의 명령만 선택 가능(`toss-proto`의 `KIND_*`)
     ///   metrics  선택한 호스트에서 측정 가능한 리소스 ID 배열(해당 호스트 목록에서 최대 `max`개까지 선택)
     ///   text     문자열(라벨)
+    ///   url      웹페이지 주소(`http://` 또는 `https://`. `layout`의 `web_url`)
     ///   color    버튼 색상 이름(UI `Theme.buttonColors`)
     #[serde(rename = "type")]
     pub kind: &'static str,
@@ -82,6 +83,17 @@ fn command_kind(kind: Kind, title: &'static str, about: &'static str, filter: &'
     let settings = vec![
         SettingInfo::new("host", "PC", "The PC that runs the command", "host", true),
         SettingInfo { filter, ..SettingInfo::new("command", "Command", pick, "command", true) },
+        SettingInfo::new("label", "Label", "Printed under it", "text", false),
+        SettingInfo::new("color", "Color", "", "color", false),
+    ];
+    KindInfo::new(kind, title, about, (1, 1), "", settings)
+}
+
+/// 웹페이지 버튼 종류 생성 헬퍼(`web` 앱). 두 종류 모두 랙 1칸이고 설정 구조가 같다(`host`, `url`, `label`, `color`).
+fn web_kind(kind: Kind, title: &'static str, about: &'static str) -> KindInfo {
+    let settings = vec![
+        SettingInfo::new("host", "PC", "The PC whose browser opens the page", "host", true),
+        SettingInfo::new("url", "Address", "http:// or https://", "url", true),
         SettingInfo::new("label", "Label", "Printed under it", "text", false),
         SettingInfo::new("color", "Color", "", "color", false),
     ];
@@ -123,6 +135,15 @@ pub fn catalog() -> Vec<AppInfo> {
                 command_kind(Kind::CommandSwitch, "Switch", "An on/off button that shows the PC's state", "switch", "toss-connector command add-switch"),
                 command_kind(Kind::CommandStepped, "Stepped knob", "A knob that selects one of several states", "stepped", "toss-connector command add-stepped"),
                 command_kind(Kind::CommandLinear, "Linear knob", "A knob that sets a value in a range", "linear", "toss-connector command add-linear"),
+            ],
+        },
+        AppInfo {
+            id: "web",
+            title: "Web page",
+            about: "Open a web page in a PC's browser",
+            widgets: vec![
+                web_kind(Kind::WebButton, "Simple", "A button that opens the page"),
+                web_kind(Kind::WebIcon, "Icon", "A button that shows the site's icon"),
             ],
         },
     ]

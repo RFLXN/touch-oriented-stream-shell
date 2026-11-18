@@ -72,6 +72,12 @@ pub enum Kind {
     /// 연속 노브: 호스트에 등록된 수치 범위 내 값을 조절한다(랙 내부 배치).
     #[serde(rename = "command.linear")]
     CommandLinear,
+    /// 웹페이지 버튼: 누르면 호스트의 기본 브라우저에서 settings의 `url`을 연다(랙 내부 배치).
+    #[serde(rename = "web.button")]
+    WebButton,
+    /// 웹페이지 아이콘 버튼: `web.button`과 같되 사이트 아이콘을 표시한다. 아이콘은 덱이 가져와 보관한다(`icons.rs`).
+    #[serde(rename = "web.icon")]
+    WebIcon,
 }
 
 impl Kind {
@@ -173,6 +179,19 @@ impl Layout {
         out
     }
 
+    /// 아이콘을 표시하는 웹페이지 버튼(`web.icon`)들의 주소(중복 제거)
+    pub fn icon_urls(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for w in self.pages.iter().flat_map(|p| &p.racks).flat_map(|r| &r.widgets).filter(|w| w.kind == Kind::WebIcon) {
+            if let Some(url) = w.settings.get("url").and_then(Value::as_str).filter(|u| web_url(u)) {
+                if !out.iter().any(|u| u == url) {
+                    out.push(url.to_string());
+                }
+            }
+        }
+        out
+    }
+
     /// 배치가 모든 규칙을 만족하는지 검증한다. 위반 사항이 있으면 사유를 반환한다.
     ///   - 랙과 복합 위젯은 페이지 그리드 범위 내에 있으며 서로 겹치지 않는다.
     ///   - 페이지에 직접 배치된 위젯은 복합 위젯이어야 한다.
@@ -232,6 +251,15 @@ impl Layout {
         }
         Ok(())
     }
+}
+
+/// 웹페이지 주소 최대 길이(바이트)
+pub const URL_MAX: usize = 512;
+
+/// 웹페이지 버튼이 열 수 있는 주소인지: `http://` 또는 `https://`로 시작하고, 공백·제어 문자가 없으며 `URL_MAX` 이하
+pub fn web_url(text: &str) -> bool {
+    let rest = text.strip_prefix("https://").or_else(|| text.strip_prefix("http://"));
+    rest.is_some_and(|r| !r.is_empty() && !r.starts_with('/')) && text.len() <= URL_MAX && text.bytes().all(|b| b.is_ascii_graphic())
 }
 
 /// 설정 JSON 값에서 메트릭 ID 배열을 추출한다(빈 값, 길이 초과, 제어 문자, 중복을 제외하고 최대 `max`개).

@@ -36,12 +36,14 @@ struct Seen {
     meter_values: u64,
     results: u64,
     result_seq: u64,
+    vault: u64,
+    icons: u64,
 }
 
 impl Seen {
     fn new(shared: &Shared) -> Self {
         let never = u64::MAX;
-        Self { sys: never, wifi: never, layout: never, device: never, hosts: never, values: never, meter_infos: never, meter_values: never, results: never, result_seq: shared.results.lock().seq() }
+        Self { sys: never, wifi: never, layout: never, device: never, hosts: never, values: never, meter_infos: never, meter_values: never, results: never, result_seq: shared.results.lock().seq(), vault: never, icons: never }
     }
 }
 
@@ -74,6 +76,12 @@ fn push(ws: &mut WebSocket<TcpStream>, shared: &Shared, seen: &mut Seen) -> Resu
     }
     if let Some(values) = shared.meter_values.fresh(&mut seen.meter_values) {
         send(ws, &ServerMsg::MeterValues { hosts: &values })?;
+    }
+    if let Some(vault) = shared.vault.fresh(&mut seen.vault) {
+        send(ws, &ServerMsg::Vault(&vault))?;
+    }
+    if let Some(icons) = shared.icons.fresh(&mut seen.icons) {
+        send(ws, &ServerMsg::Icons { icons: &icons })?;
     }
     if let Some(results) = shared.results.fresh(&mut seen.results) {
         for (widget, seq, ok, error) in results.since(seen.result_seq) {
@@ -110,6 +118,9 @@ fn handle(shared: &Arc<Shared>, msg: ClientMsg) {
                 ClientMsg::PairStop | ClientMsg::PairReject => hosts.pair_stop(toss_proto::DENIED_REJECTED),
                 ClientMsg::PairAccept { code } => hosts.pair_accept(&code),
                 ClientMsg::HostForget { id } => hosts.forget(&id),
+                ClientMsg::VaultAnswer { allow } => hosts.vault_answer(allow),
+                ClientMsg::VaultRevoke { service, host } => hosts.vault_revoke(&service, &host),
+                ClientMsg::VaultForget { service } => hosts.vault_forget(&service),
                 _ => {}
             }
         }

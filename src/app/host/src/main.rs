@@ -2,7 +2,8 @@
 //!
 //! 인자 없이 실행하면 페어링된 덱에 접속해 데몬으로 동작한다(프로토콜: src/app/proto, 설계 문서: docs/04-host-link.md):
 //!   - 호스트 상태를 이벤트 기반으로 덱에 전송(재생 정보·앨범 아트, 등록된 명령과 상태 값, 리소스 사용량)
-//!   - 덱의 요청 실행(미디어 제어, 등록된 명령 실행 및 값 설정; 덱은 등록된 항목 중에서만 선택 가능)
+//!   - 덱의 요청 실행(미디어 제어, 등록된 명령 실행 및 값 설정; 덱은 등록된 항목 중에서만 선택 가능, 웹페이지 열기)
+//!   - 덱 금고 중계: 외부 연동 키는 덱에 보관하고, 이 PC는 덱에서 빌린 토큰만 쓴다(현재는 Discord)
 //!
 //! 모든 동작은 해당 덱에 부여된 권한 범위 내에서만 수행한다(trust 모듈). 미허용 요청은 거절하고 로그에 기록한다.
 //!
@@ -21,12 +22,14 @@
 //!   store     설정 디렉터리 관리(키 쌍, 페어링 목록).  jsonfile  안전한 JSON 읽기/쓰기
 //!   trust     덱별 권한 테이블 및 검증.  managed  시스템(NixOS) 관리 설정
 //!   commands  사용자 명령 등록/실행/감시.  media, art  미디어 제어 및 앨범 아트.  meter  리소스 측정
+//!   vault     덱 금고 요청 중계.  discord  Discord 앱 연결(로컬 RPC).  web  웹페이지 열기
 
 mod art;
 mod cli;
 mod commands;
 mod console;
 mod daemon;
+mod discord;
 mod jsonfile;
 mod link;
 mod managed;
@@ -37,6 +40,8 @@ mod session;
 mod standby;
 mod store;
 mod trust;
+mod vault;
+mod web;
 
 use std::path::PathBuf;
 
@@ -81,6 +86,13 @@ const USAGE: &str = "사용법:
   toss-connector console port <번호>  콘솔 포트 변경 (기본 7880, 데몬 재시작 필요)
   toss-connector sleep [덱]           덱 절전 전환 (Wi-Fi 연결 시에만 가능. 절전 후 Wi-Fi로만 깨우기 가능)
   toss-connector wake [덱]            절전 중인 덱 깨우기 (Wi-Fi 매직 패킷 전송. 같은 네트워크에 있어야 함)
+  toss-connector discord              Discord 연동 상태 조회 (키는 덱에 보관되며 이 PC에는 남지 않음)
+  toss-connector discord set          Discord 앱 키(Client ID, Client Secret, Redirect URI)를 입력받아 덱에 저장
+  toss-connector discord link         Discord 앱에서 승인을 받아 덱이 토큰을 발급받게 함 (처음 한 번)
+  toss-connector discord check        덱에서 토큰을 빌려 Discord 앱에 인증해 보기
+  toss-connector discord forget       덱에서 Discord 키와 토큰 삭제
+                                 discord 명령은 실행 중인 toss-connector(웹 콘솔 포함)와 덱 연결이 필요합니다.
+                                 이 PC가 처음 덱 금고를 쓰면 덱 화면에서 허용 여부를 묻습니다.
 옵션:
   --config <디렉터리>            키와 설정 파일을 저장할 경로 (기본: 사용자 설정 디렉터리)
   --no-console                   웹 콘솔 비활성화";
@@ -136,6 +148,7 @@ fn main() {
         "command" => cli::command(&store.commands(), &rest, &tail),
         "managed" => cli::managed(&store, &rest),
         "console" => console::cli(&store, &rest),
+        "discord" => console::discord_cli(&store, rest.first().map(String::as_str)),
         other => usage(&format!("알 수 없는 명령: {other}")),
     }
 }
@@ -155,7 +168,7 @@ fn misplaced(command: &str, rest: &[String], deck: bool, tail: bool, no_console:
     }
     let most = match (command, first) {
         ("pair" | "list", _) => 0,
-        ("forget" | "sleep" | "wake" | "trust", _) => 1,
+        ("forget" | "sleep" | "wake" | "trust" | "discord", _) => 1,
         ("managed", Some("check")) => 2,
         ("managed", _) => 1,
         ("console", Some("allow" | "deny" | "port")) => 2,

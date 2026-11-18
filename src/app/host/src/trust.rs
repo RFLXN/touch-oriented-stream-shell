@@ -13,7 +13,7 @@
 
 use std::collections::BTreeMap;
 
-use toss_proto::{action_cap, CAP_COMMAND_RUN, CAP_MEDIA_CONTROL, CAP_MEDIA_INFO, CAP_RESOURCE_INFO, ERROR_NOT_ALLOWED};
+use toss_proto::{action_cap, CAP_COMMAND_RUN, CAP_MEDIA_CONTROL, CAP_MEDIA_INFO, CAP_RESOURCE_INFO, CAP_WEB_OPEN, ERROR_NOT_ALLOWED};
 
 pub struct Permission {
     /// 프로토콜 CAP_* 상수와 동일한 식별자. decks.json과 CLI에서 사용
@@ -30,6 +30,7 @@ pub const PERMISSIONS: &[Permission] = &[
     Permission { id: CAP_MEDIA_CONTROL, title: "미디어 제어", about: "덱에서 재생/일시정지, 곡 이동, 탐색, 반복·셔플을 제어합니다", default: true },
     Permission { id: CAP_RESOURCE_INFO, title: "리소스 사용량 공유", about: "PC의 CPU·메모리·GPU·디스크·네트워크·온도를 덱에 보냅니다 (위젯에 등록된 항목만 측정)", default: true },
     Permission { id: CAP_COMMAND_RUN, title: "명령 실행", about: "PC에 등록된 명령을 덱에서 실행하고 스위치·노브 값을 조회/변경합니다 (등록된 항목만 가능, 커맨드 원문 비공개)", default: false },
+    Permission { id: CAP_WEB_OPEN, title: "웹페이지 열기", about: "덱의 웹페이지 버튼으로 이 PC의 기본 브라우저에서 주소를 엽니다 (http/https 주소만)", default: false },
 ];
 
 /// 특정 덱에 대한 사용자 권한 설정(권한 ID → 허용 여부). 목록에 없으면 기본값 사용

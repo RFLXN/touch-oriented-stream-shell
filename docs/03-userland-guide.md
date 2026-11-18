@@ -536,13 +536,13 @@ Wi-Fi가 연결되면 기기가 직접 인터넷에 나가므로 `tf-net.sh` 없
 | 위치 | eMMC `cache` 파티션(384MB, 가용 공간 약 343MB). 순정 안드로이드가 쓰던 파티션이며 이 시스템은 덮어쓰지 않는다(`deploy.sh`는 `boot`, `recovery`, `userdata`만 기록) |
 | 마운트 | 서비스 `tf-data`(`src/os/rootfs/etc/init.d/tf-data`, `boot` 런레벨). 파티션을 이름으로 찾아 fsck 후 `/data`에 마운트하고, 앱 디렉터리 `/data/toss/`를 만들어 데몬 사용자 소유로 넘긴다. 데몬 서비스(`tossd`)는 이 서비스 이후에 시작된다 |
 | 파일시스템 | 기존 ext4를 **그대로** 사용한다(포맷하지 않음). 따라서 안드로이드가 남긴 디렉터리(`backup`, `customer`, `recovery` 등)가 함께 보인다. 건드리지 않으면 된다. 원본 내용은 `local/backup/cache.img`에 있다 |
-| 현재 저장 데이터 | `/data/wifi/wpa_supplicant.conf`(저장된 Wi-Fi AP와 비밀번호), `/data/toss/`(화면 밝기와 SSH 활성 여부를 담은 `settings.json`, 덱 신원 키 `key`와 페어링 호스트 목록 `hosts.json` — [04-host-link.md](04-host-link.md) 4.9절 —, 그리고 사용자가 편집한 레이아웃 `layout.json` — 3.16절 "레이아웃 편집") |
+| 현재 저장 데이터 | `/data/wifi/wpa_supplicant.conf`(저장된 Wi-Fi AP와 비밀번호), `/data/toss/`(화면 밝기와 SSH 활성 여부를 담은 `settings.json`, 덱 신원 키 `key`와 페어링 호스트 목록 `hosts.json` — [04-host-link.md](04-host-link.md) 4.9절 —, 사용자가 편집한 레이아웃 `layout.json` — 3.16절 "레이아웃 편집", 외부 연동 키를 암호화해 둔 금고 `vault.json`과 그 키 `vault.key`(둘 다 0600) — [04-host-link.md](04-host-link.md) 4.15절, 웹페이지 아이콘 버튼의 사이트 아이콘 `icons/`) |
 | 추후 추가 대상 | UI 표시 설정(테마, 글래스 효과) — 현재는 미저장 |
 
 - 파일시스템이 손상돼 마운트에 실패하면 서비스가 새로 포맷한다(기존 데이터 소실). 파티션 자체가 없거나 포맷 후에도 마운트에 실패하면 `/data`는 루트 위 디렉터리로 남으며, 이 경우 재플래싱 시 함께 초기화된다. 그 상태에서도 `/data/toss/`는 만들어지므로 앱은 다음 플래싱 전까지 정상적으로 읽고 쓴다.
 - 확인 명령: `src/scripts/tf-ssh.sh 'mountpoint /data && df -h /data'`
 - **`/data/toss/`의 파일은 원자적으로 기록한다.** 같은 디렉터리의 임시 파일(`<이름>.new`)에 쓰고 fsync까지 마친 뒤 이름을 바꾼다. 쓰는 도중 전원이 끊겨도 이전 파일이나 새 파일 중 하나가 온전히 남는다.
-- **파싱할 수 없는 파일은 덮어쓰지 않고 백업한다.** 이름 뒤에 `.bad`를 붙여 치워 두고(`layout.json.bad`, `hosts.json.bad`, `settings.json.bad`, `key.bad`) 데몬 로그에 사유를 남긴 뒤, 해당 파일이 없는 것처럼 기본 상태로 기동한다(기본 레이아웃, 빈 페어링 목록, 새 키). 규칙에 어긋난 레이아웃도 동일하다. 구현은 `src/app/tossd/src/persist.rs`에 있다.
+- **파싱할 수 없는 파일은 덮어쓰지 않고 백업한다.** 이름 뒤에 `.bad`를 붙여 치워 두고(`layout.json.bad`, `hosts.json.bad`, `settings.json.bad`, `key.bad`, `vault.json.bad`, `vault.key.bad`) 데몬 로그에 사유를 남긴 뒤, 해당 파일이 없는 것처럼 기본 상태로 기동한다(기본 레이아웃, 빈 페어링 목록, 새 키). 규칙에 어긋난 레이아웃도 동일하다. 구현은 `src/app/tossd/src/persist.rs`에 있다.
 - 데몬은 시작 시 `/data/toss` 쓰기 가능 여부를 확인해 불가능하면 로그에 한 줄 남긴다(`…에 쓸 수 없습니다`). 이 경우 레이아웃, 페어링, 설정은 재부팅 시 유지되지 않는다.
 - 기기를 초기 상태로 되돌리려면(저장된 AP 전체 삭제) 기기에서 `/data/wifi` 디렉터리를 지우고 재부팅한다.
 - `/data` 내용은 PC에 백업되지 않는다. 기기를 분실하거나 `cache` 파티션을 덮어쓰면 소실된다.
@@ -583,10 +583,10 @@ MAC 주소는 `/etc/tossfront/eth0.mac`에 적힌 값으로 부팅 시 고정된
 
 | 기능 | 내용 | 상세 설명 |
 |---|---|---|
-| 위젯 | 미디어 제어(4×2), 리소스 미터(덱 자체 및 PC의 CPU·메모리·GPU·디스크·네트워크·온도, 크기 4종), 랙과 내부 명령 위젯 4종(버튼, 스위치, 단계 노브, 연속 노브) | 아래 "앱과 위젯" |
+| 위젯 | 미디어 제어(4×2), 리소스 미터(덱 자체 및 PC의 CPU·메모리·GPU·디스크·네트워크·온도, 크기 4종), 랙과 내부 명령 위젯 4종(버튼, 스위치, 단계 노브, 연속 노브), 웹페이지 버튼 2종(일반, 사이트 아이콘) | 아래 "앱과 위젯" |
 | 레이아웃 | 페이지당 4×6 타일. 기기에서 직접 편집해 기기에 저장. 초기 레이아웃은 1페이지에 미디어 제어와 리소스 미터(덱 자체 온도, 메모리, 로드) 배치 | 아래 "레이아웃 편집" |
-| 설정 | 화면 밝기, 테마, 글래스 효과, Wi-Fi, SSH 켜고 끄기, 페어링, 레이아웃 편집·초기화, 절전, 전원 끄기 | 아래 "UI 구성" |
-| PC 연동 | 페어링된 PC의 재생 정보 표시 및 제어. PC 리소스 사용량 표시. 등록된 명령 실행 및 스위치·노브 조작. PC에서 덱 슬립·웨이크업 제어 | [04-host-link.md](04-host-link.md) |
+| 설정 | 화면 밝기, 테마, 글래스 효과, Wi-Fi, SSH 켜고 끄기, 페어링, 외부 연동 키(덱 금고) 상태와 PC별 허용, 레이아웃 편집·초기화, 절전, 전원 끄기 | 아래 "UI 구성" |
+| PC 연동 | 페어링된 PC의 재생 정보 표시 및 제어. PC 리소스 사용량 표시. 등록된 명령 실행 및 스위치·노브 조작. PC 브라우저에서 웹페이지 열기. 외부 연동 키를 덱에 보관하고 PC에 토큰만 빌려주기(Discord). PC에서 덱 슬립·웨이크업 제어 | [04-host-link.md](04-host-link.md) |
 
 ### UI 구성
 
@@ -610,6 +610,7 @@ MAC 주소는 `/etc/tossfront/eth0.mac`에 적힌 값으로 부팅 시 고정된
 | `LAYOUT` | `Edit layout` | 레이아웃 편집 모드 진입 |
 | | `Reset layout` | 기본 레이아웃으로 초기화(확인 다이얼로그) |
 | `DEVICES` | `Paired devices` | 페어링된 PC 목록, 신규 페어링, 삭제(확인 다이얼로그. [04-host-link.md](04-host-link.md) 4.4절) |
+| `INTEGRATIONS` | 서비스(현재는 `Discord`) | 덱 금고에 보관한 키의 상태(없음, 승인 전, 연결됨), 금고를 쓰도록 허용한 PC 목록과 해제(`REVOKE`), 키 삭제(`FORGET KEY`, 확인 다이얼로그). 키는 여기서 입력하지 않고 PC에서 보낸다([04-host-link.md](04-host-link.md) 4.15절) |
 | `POWER` | `Sleep` | 절전 진입(확인 다이얼로그). Wi-Fi 연결 시에만 가능 |
 | | `Power off` | 전원 종료(확인 다이얼로그) |
 
@@ -640,7 +641,7 @@ UI와 데몬을 합친 프로그램 전체는 "스트림덱 앱"으로 부른다
 
 ### 앱과 위젯
 
-사용자가 추가할 수 있는 위젯은 3개 앱의 위젯 종류 9가지다(데몬 `catalog`). 앱 선택 → 위젯 종류 선택 → 위젯 설정 순서로 추가한다.
+사용자가 추가할 수 있는 위젯은 4개 앱의 위젯 종류 11가지다(데몬 `catalog`). 앱 선택 → 위젯 종류 선택 → 위젯 설정 순서로 추가한다.
 
 | 앱 | 위젯 종류 | 배치 위치 | 설정 항목 | 동작 |
 |---|---|---|---|---|
@@ -650,11 +651,15 @@ UI와 데몬을 합친 프로그램 전체는 "스트림덱 앱"으로 부른다
 | | `command.switch` | 랙 슬롯 | 위와 동일 | 스위치 버튼: 온/오프 전환. 상태는 PC가 보고 |
 | | `command.stepped` | 랙 슬롯 | 위와 동일 | 단계 노브: 지정 단계 중 선택 |
 | | `command.linear` | 랙 슬롯 | 위와 동일 | 연속 노브: 범위 내 값 조절 |
+| `Web page` | `web.button` | 랙 슬롯 | PC, 주소(`http://` 또는 `https://`), 라벨, 색상 | 버튼(`Simple`): 탭 시 그 PC의 기본 브라우저에서 주소를 연다 |
+| | `web.icon` | 랙 슬롯 | 위와 동일 | 아이콘 버튼(`Icon`): `web.button`과 같되 버튼 윗면에 사이트 아이콘을 그린다 |
 
 - **명령 위젯 4종은 PC에 등록된 명령 1개를 가리킨다.** 실행 내용, 단계/범위, 현재 상태는 모두 PC가 관리한다. 덱은 위젯 추가 시 골라 매핑만 한다([04-host-link.md](04-host-link.md) 4.6절 "명령").
 - 상태가 없는 실행 버튼(`command.run`)에는 인디케이터가 없고, 온/오프 상태가 있는 스위치에는 있다. 노브는 라벨 아래에 현재 값을 표시한다.
 - UI 구현은 위젯 종류별로 `src/app/ui/widgets/` 아래 파일이 대응된다: `MediaWidget`, `MeterWidget`(리소스 미터 4종 공용), `CommandWidget`, `CommandSwitchWidget`, `CommandSteppedWidget`, `CommandLinearWidget`(명령 위젯 4종 공통 베이스 `CommandBase`). 종류와 QML 파일 매핑은 `shell/WidgetSlot`의 `sources`에 정의돼 있다.
 - 해당 PC가 미연결이거나 위젯이 쓰는 것을 제공하지 않는 상태(권한 해제, 명령 삭제)에서는 위젯이 비활성화(흐림)돼 눌리지 않는다. 명령 위젯이 가리키는 명령의 종류가 위젯과 어긋난 경우에도 비활성화된다(버튼은 `run`, 스위치는 `switch`, 노브는 `stepped`·`linear`).
+- **웹페이지 버튼은 그 PC가 `web.open` 권한을 허용했을 때만 눌린다**(기본은 꺼짐. [04-host-link.md](04-host-link.md) 4.5절). 주소는 위젯 설정에 저장되며 데몬이 `http://`, `https://` 주소만 받는다(공백·제어 문자 없이 512바이트 이하). PC도 같은 검사를 다시 한다.
+- **사이트 아이콘은 덱이 직접 가져온다**(`src/app/tossd/src/icons.rs`. 덱이 인터넷에 연결되어 있어야 한다). 페이지의 `apple-touch-icon`, `icon`, 웹 앱 매니페스트의 `icons`와 사이트 루트의 `/apple-touch-icon.png`, `/apple-touch-icon-precomposed.png`, `/favicon.ico`를 모아 크기가 큰 것부터 하나씩 받아 보고, 화면이 그릴 수 있는 이미지(PNG, JPEG, GIF, ICO)인 첫 번째 것을 쓴다. SVG와 WebP는 건너뛴다. 받은 아이콘은 `/data/toss/icons/`에 보관하고, 아직 없거나 가져오지 못했으면 지구본 모양을 그린다. 실패한 주소는 10분 뒤 다시 시도한다.
 - 새 위젯 종류 추가 방법은 3.17절을 참고한다.
 
 ### 리소스 미터 (앱 Resource monitor)
@@ -777,6 +782,9 @@ UI와 데몬을 합친 프로그램 전체는 "스트림덱 앱"으로 부른다
 | UI → 데몬 | `wifi_connect` | AP 접속 요청. `key`(목록 식별 키)와 필요 시 `psk`(비밀번호) |
 | UI → 데몬 | `wifi_forget` | 저장된 AP 삭제 요청 |
 | 데몬 → UI | `hosts` | 페어링된 호스트 목록(이름, OS, 덱에 허용된 권한, 연결 상태와 경로, 재생 정보, 앨범 아트) 및 페어링 진행 상태(페어링 모드 여부, 요청 호스트와 검증 코드). 변경 시만 전송. 호스트가 보낸 이름·OS는 데몬이 길이와 문자를 정제해 전달 |
+| 데몬 → UI | `vault` | 덱 금고 상태: 서비스별 키 보관 여부(`registered`), 토큰 갱신 가능 여부(`linked`), 금고를 쓰도록 허용한 호스트(`hosts`), 화면에서 허용 여부를 묻는 중인 요청(`asking`. 없으면 `null`). 키 값은 오지 않는다 |
+| UI → 데몬 | `vault_answer`, `vault_revoke`, `vault_forget` | `asking`에 답하기(`allow`), 호스트의 금고 사용 허용 해제(`service`, `host`), 서비스 키와 토큰 삭제(`service`) |
+| 데몬 → UI | `icons` | 웹페이지 아이콘 버튼이 표시할 사이트 아이콘(주소 → `data:` URI). 가져오지 못한 주소는 빠진다. 변경 시 전체 전송 |
 | UI → 데몬 | `pair_start`, `pair_stop`, `pair_accept`, `pair_reject`, `host_forget` | 페어링 모드 시작·중지, 수락·거절, 페어링 삭제. `pair_accept`에는 화면에 표시된 검증 코드(`code`)를 함께 실어 보내며 현재 후보 코드와 다르면 무시한다(탭하는 순간 후보가 다른 PC로 바뀔 수 있는 경쟁 상태 방지). `pair_stop`과 `pair_reject`는 대기 중인 PC에 `rejected` 알림 전송 |
 
 호스트(PC) 측 프로토콜은 [04-host-link.md](04-host-link.md) 4.6절에 정리돼 있다.
@@ -919,10 +927,12 @@ UI (`src/app/ui/`):
 | `SettingsList` | 설정 목록 컨테이너: 라벨·액션 버튼, 연한 패널 내 스크롤 목록, 빈 상태 안내. 목록 갱신 시에도 스크롤 위치와 누른 행 상태 유지 |
 | `WifiPage`, `WifiJoin` | Wi-Fi 화면: 연결 상태와 AP 목록, 개별 AP 접속/삭제 |
 | `DevicesPage`, `DevicePage`, `PairPage` | 기기 관리 화면: 페어링 PC 목록, 개별 PC 상세 정보/해제, 신규 페어링 |
+| `VaultPage` | 연동 서비스 상세 화면(설정의 INTEGRATIONS): 덱 금고 키 상태, 금고를 쓰도록 허용한 PC와 해제, 키 삭제 |
 | `KeyValueRows` | 디스플레이 내부 Key-Value 표 (정보 시트, 페어링 화면의 PC 실행 커맨드) |
 | `AddPanel`, `AddOption` | 위젯 추가 시트(앱 → 위젯 종류 → 설정) 및 설정 항목 선택 컴포넌트 |
 | `Dialog` | 중앙 모달 다이얼로그 베이스: 배경 딤머와 카드(`Dialog.Card`) |
 | `ConfirmDialog` | 확인 다이얼로그 (`ask(제목, 설명, 버튼 라벨, 액션, 색상)`) |
+| `VaultAsk` | 덱 금고 사용 허용 다이얼로그: 허용하지 않은 PC가 금고를 쓰려 하면 데몬이 묻는 요청(`vault.asking`)을 띄운다. `ALLOW` / `DENY`(바깥 영역도 거절) |
 | `RenameDialog` | 랙 이름 변경 다이얼로그 |
 | `LinkInfo` | 인터페이스 상세 정보 시트 |
 | `KeyboardPanel` | 온스크린 키보드 컨테이너 |
@@ -937,6 +947,8 @@ UI (`src/app/ui/`):
 | `CompositeWidget` | 복합 위젯 베이스: `WidgetBase`에 위젯 프레임과 라벨을 결합. 라벨 우측 끝 요소는 `corner` 슬롯에 배치 |
 | `CommandBase` | 명령 위젯 4종 공통 베이스: 대상 명령 활성 여부(`ready`), 버튼·노브 색상과 라벨, 값 전송 후 응답 대기 중 선택값 유지(`hold()`, `set(값)`), 거절 피드백 시그널(`refused()`) |
 | `CommandWidget`, `CommandSwitchWidget`, `CommandSteppedWidget`, `CommandLinearWidget` | 명령 버튼, 명령 스위치, 단계 노브, 연속 노브 |
+| `WebBase` | 웹페이지 위젯 2종 공통 베이스: 대상 주소, 활성 여부(`ready`: PC 연결과 `web.open` 권한), 색상과 라벨, `open()` |
+| `WebButtonWidget`, `WebIconWidget` | 웹페이지 버튼, 사이트 아이콘을 그리는 웹페이지 버튼(아이콘은 `icons`에서 받음) |
 | `MediaWidget` | 미디어 제어 위젯 |
 | `MeterWidget` | 리소스 미터 위젯 (4종 크기 공용) |
 
@@ -956,6 +968,8 @@ UI (`src/app/ui/`):
 | `hosts/pairing.rs` | 페어링 모드 및 후보 관리, 양측 검증 처리 | 수정 불필요 |
 | `hosts/blob.rs` | 청크로 수신되는 앨범 아트 바이너리 조립 | 수정 불필요 |
 | `hosts/store.rs` | 페어링 호스트 목록(`hosts.json`)과 덱 키(`key`) 파일 저장 | 수정 불필요 |
+| `hosts/vault.rs` | 덱 금고: 외부 연동 키 암호화 보관(`vault.json`, `vault.key`), 금고를 쓸 수 있는 호스트 관리와 허용 질문, 토큰 발급·갱신과 대여([04-host-link.md](04-host-link.md) 4.15절) | 새 서비스를 더할 때 `SERVICES` |
+| `icons.rs` | 웹페이지 아이콘 버튼의 사이트 아이콘 가져오기(큰 것부터 시도)와 `icons/` 보관 | 수정 불필요 |
 | `sys.rs` | 시스템 상태 수집(상단바 및 정보 시트용: 호스트명, IP, 인터페이스 링크 상태). 리소스 사용량은 `src/app/meter`(PC 공용 크레이트)가 측정하며 `state.rs`가 1초마다 호출 | 수정 불필요 |
 | `device.rs` | 덱 하드웨어 제어: 화면 밝기, 절전, 전원 종료, SSH 토글 | 수정 불필요 |
 | `wifi.rs` | Wi-Fi 상태 및 접속 관리 (`wpa_supplicant` 제어 소켓 연동) | 수정 불필요 |

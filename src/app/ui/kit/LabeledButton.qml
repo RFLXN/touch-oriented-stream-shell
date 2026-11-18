@@ -5,6 +5,7 @@
 // 버튼 자체가 작으므로 라벨을 포함한 셀 전체 영역을 터치 영역으로 잡는다.
 // `on`이 true면 버튼이 눌린 채 유지되고 인디케이터가 점등된다(스위치 버튼). `flash()`는 인디케이터를 한 번 깜빡인다.
 // 상태가 없는 단발 버튼은 인디케이터를 끈다(`indicator: false`): 이때는 라벨만 중앙 정렬된다.
+// `image`(이미지 주소나 `data:` URI)를 주면 버튼 윗면에 그 그림을, 없거나 읽지 못하면 `glyph`(`Glyph` 이름)를 그린다(웹페이지 아이콘 버튼).
 import QtQuick
 
 Item {
@@ -14,6 +15,8 @@ Item {
     property bool on: false
     property bool indicator: true
     property color indicatorColor: Theme.indicatorGreen
+    property string image: ""
+    property string glyph: ""
     signal tapped()
     function flash() { lamp.flash() }
 
@@ -31,6 +34,26 @@ Item {
             held: root.on
             interactive: false
             down: tap.pressed
+            Image {
+                id: picture
+                anchors.centerIn: parent
+                width: 52
+                height: 52
+                visible: root.image !== "" && status === Image.Ready
+                source: root.image
+                sourceSize: Qt.size(104, 104)
+                fillMode: Image.PreserveAspectFit
+                smooth: true
+                mipmap: true
+                asynchronous: true
+            }
+            Glyph {
+                anchors.centerIn: parent
+                visible: root.glyph !== "" && !picture.visible
+                name: root.glyph
+                size: 30
+                color: button.inkColor
+            }
         }
         Row {
             id: caption

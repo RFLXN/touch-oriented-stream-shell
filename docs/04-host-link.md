@@ -156,6 +156,7 @@ TCP 위에서 **"길이(2바이트 빅 엔디안) + 페이로드"** 프레임을
 | `media.control` | 덱에서 재생/일시정지, 트랙 이동, 시크, 반복·셔플 제어 가능 | 허용 |
 | `resource.info` | PC 리소스 사용량(CPU, 메모리, GPU, 디스크, 네트워크, 온도)을 덱으로 전송. 덱의 리소스 미터 위젯이 구독 중인 항목만 측정(4.6절 "리소스 모니터링") | 허용 |
 | `command.run` | PC에 **미리 등록된** 명령을 덱에서 실행하고, 등록된 스위치·노브 상태를 조회·변경 가능(4.6절 "명령") | **거부** |
+| `web.open` | 덱의 웹페이지 버튼으로 이 PC의 기본 브라우저에서 주소를 연다. `http://`, `https://` 주소만 연다 | **거부** |
 
 ### 동작 규칙
 
@@ -219,6 +220,7 @@ NixOS에서는 시스템 설정으로 권한을 고정할 수도 있다(`program
 | `blob` | `id`, `mime`, `index`, `count`, `data` | 대용량 바이너리 청크(현재는 앨범 아트). 아래 "대용량 바이너리" 참고 |
 | `result` | `id`, `ok`, `error` | 덱이 요청한 액션 결과. 미허용 권한이면 `error`는 `not_allowed`. 덱은 그 액션을 받은 호스트의 응답만 매칭함(다른 호스트가 같은 ID로 보낸 응답은 무시) |
 | `sleep` | — | 덱 절전 진입 요청(`toss-connector sleep`). 덱은 `sleeping` 응답 후 슬립 진입 |
+| `vault` | `id`, `op`, `service`, `args` | 덱 금고 요청(4.15절). `op`는 `put`(서비스 키 저장), `forget`(삭제), `begin`(공개 값 받기), `token`(토큰 빌리기). 덱은 `vault_reply`로 답한다 |
 | `ping` | — | 연결 유지(keep-alive) |
 
 ### 덱 → 호스트 (`DeckMsg`)
@@ -231,6 +233,8 @@ NixOS에서는 시스템 설정으로 권한을 고정할 수도 있다(`program
 | `denied` | `reason` | 연결 거절. 직후 소켓 종료 |
 | `action` | `id`, `name`, `args` | 액션 실행 요청. `id`는 `result`와 상관관계 매칭용 시퀀스 |
 | `watch` | `metrics`(메트릭 ID 목록) | 덱이 현재 표시 중인 메트릭 목록. 호스트는 여기에 포함된 항목만 수집. 연결 직후 및 레이아웃 변경마다 전체 전송. 빈 배열이면 수집 중단 |
+| `vault_reply` | `id`, `ok`, `error`, `data` | `vault` 응답. 실패하면 `error`에 `denied`, `busy`, `timeout`, `not_set`, `not_linked`, `unknown` 중 하나나 사유 문장이 담긴다(4.15절) |
+| `vault_state` | `services`(`id`, `title`, `registered`, `linked`, `allowed`) | 덱 금고 상태. 키 값은 포함하지 않는다. 연결 직후와 상태가 바뀔 때마다 전체 전송. `allowed`는 이 호스트가 금고를 쓸 수 있는지 |
 | `ping` | — | 연결 유지(keep-alive) |
 
 ### 재생 정보 (`media`)
@@ -261,6 +265,7 @@ NixOS에서는 시스템 설정으로 권한을 고정할 수도 있다(`program
 | `media.loop` | 반복 모드 설정. `args`: `{"mode": "none" \| "playlist" \| "track"}` | `media.control` |
 | `command.run` | 호스트에 등록된 명령 실행. `args`: `{"id": "<명령 ID>"}` | `command.run` |
 | `command.set` | 호스트에 등록된 스위치·단계·범위 명령 값 설정. `args`: `{"id": "<명령 ID>", "value": 1}`(값 형식은 `command_value`와 동일) | `command.run` |
+| `web.open` | 호스트의 기본 브라우저로 웹페이지 열기. `args`: `{"url": "https://..."}`. 호스트는 `http://`, `https://` 주소만 열고, 셸을 거치지 않고 `xdg-open`(macOS는 `open`)의 인자로만 넘긴다 | `web.open` |
 
 - **상태 전환 액션은 "토글하라"가 아니라 "이 값으로 설정하라"로 보낸다**(`on`, `mode`). 같은 메시지를 중복 수신해도 멱등성이 보장되며, 덱이 가진 상태가 약간 지연됐더라도 의도와 반대로 뒤집히지 않는다.
 - 시크는 호스트가 목표 위치를 계산해 곡 범위 `[0, length_ms)` 내로 클램프한다(0 이전이면 0으로, 곡 끝을 넘기면 끝 직전으로 맞춰 다음 곡으로 넘어가지 않게 함).
@@ -511,6 +516,11 @@ nix build .#toss-connector -o dist/toss-connector && ./dist/toss-connector/bin/t
 | `toss-connector console allow <출처>` / `toss-connector console deny <출처>` | 외부에 호스팅한 콘솔 페이지의 Origin 허용 / 해제 |
 | `toss-connector console list` | 콘솔 URL과 허용 Origin 목록 출력 |
 | `toss-connector console port <번호>` | 콘솔 포트 변경(기본 7880. 재시작 필요) |
+| `toss-connector discord` | Discord 연동 상태 조회: 덱에 키가 있는지, 연결(승인)했는지, 이 PC가 금고를 쓸 수 있는지(4.15절) |
+| `toss-connector discord set` | Discord 앱 키(Client ID, Client Secret, Redirect URI)를 입력받아 덱 금고에 저장. Client Secret은 화면에 표시하지 않고 이 PC에 남기지 않는다 |
+| `toss-connector discord link` | Discord 앱에서 승인을 받아 덱이 토큰을 발급받게 한다(처음 한 번) |
+| `toss-connector discord check` | 덱에서 토큰을 빌려 Discord 앱에 인증해 본다 |
+| `toss-connector discord forget` | 덱 금고에서 Discord 키와 토큰 삭제 |
 | `--config <디렉터리>` | 키와 설정 파일을 저장할 경로 |
 | `--no-console` | 웹 콘솔 비활성화 (인자 없이 실행할 때만 사용) |
 
@@ -535,7 +545,10 @@ nix build .#toss-connector -o dist/toss-connector && ./dist/toss-connector/bin/t
 | `src/art.rs` | 앨범 아트를 가져와(파일, http/https) 512px 안으로 축소 |
 | `src/managed.rs` | 관리형 설정(`/etc/toss-connector/managed.json`): 파싱과 검증, 사용자 설정 위에 덮어씌우는 규칙(strict) |
 | `src/meter.rs` | PC 리소스를 측정해 덱으로 보내는 스레드: 덱이 구독 중인 항목만, 바뀐 값만. 측정 자체는 `src/app/meter`(덱과 공용인 크레이트)가 담당 |
-| `src/console.rs` | 웹 콘솔: 정적 파일을 서빙하고 API를 받는 작은 HTTP 서버, 토큰과 Origin 검증, 콘솔에서 진행하는 페어링 |
+| `src/console.rs` | 웹 콘솔: 정적 파일을 서빙하고 API를 받는 작은 HTTP 서버, 토큰과 Origin 검증, 콘솔에서 진행하는 페어링과 Discord 연결. `discord` CLI도 이 API를 호출한다 |
+| `src/vault.rs` | 덱 금고 요청 중계: 웹 콘솔과 CLI의 요청을 지금 연결된 덱 세션으로 보내고 응답을 기다린다. 덱이 알려 준 금고 상태 기록 |
+| `src/discord.rs` | Discord 앱의 로컬 RPC(IPC 소켓) 클라이언트와 연결(`link`)·확인(`check`) 절차 |
+| `src/web.rs` | 웹페이지 열기(`web.open`): 주소 검증과 `xdg-open` 실행 |
 | `console/` | 웹 콘솔의 프론트엔드(정적 파일 3개). 빌드 시 바이너리에 내장 |
 
 ### NixOS에 설치 (`programs.toss-connector`)
@@ -631,7 +644,7 @@ programs.toss-connector = {
 
 ### 웹 콘솔
 
-CLI 기능을 브라우저에서 제공한다: 덱별 권한 토글, 명령 등록·수정·삭제 및 테스트 실행, 페어링(코드 확인), 절전·웨이크업. 실행 중인 `toss-connector` 프로세스 내부에서 서빙되므로 별도 프로세스가 필요 없다.
+CLI 기능을 브라우저에서 제공한다: 덱별 권한 토글, 명령 등록·수정·삭제 및 테스트 실행, 페어링(코드 확인), 절전·웨이크업, 외부 연동(Discord 키 저장·연결·확인·삭제. 4.15절). 실행 중인 `toss-connector` 프로세스 내부에서 서빙되므로 별도 프로세스가 필요 없다.
 
 ```bash
 toss-connector                 # 실행해 두면 콘솔도 함께 기동 (http://127.0.0.1:7880/)
@@ -671,6 +684,8 @@ toss-connector console         # 브라우저로 열기 (토큰 자동 첨부)
 | `POST /api/commands`, `PUT`·`DELETE /api/commands/<id>` | 명령 등록, 수정(ID 유지), 삭제 |
 | `POST /api/commands/<id>/run`, `set`, `GET …/state` | PC에서 즉시 실행, 값 설정 테스트, 현재 상태 조회 |
 | `POST /api/pair`, `/api/pair/confirm`, `/api/pair/cancel` | 페어링 시작(`{"addr": …}`), 검증 코드 확인, 취소. 진행 상태는 `/api/state`의 `pairing`으로 확인 |
+| `POST /api/vault/<서비스>/put`, `forget` | 덱 금고에 서비스 키 저장(`{"client_id", "client_secret", "redirect_uri"}`), 삭제. 덱이 화면에서 허용 여부를 묻는 동안 최대 1분쯤 응답이 늦어진다. 연결된 덱의 금고 상태는 `/api/state`의 `vault` |
+| `POST /api/discord/link`, `check`, `clear` | Discord 연결(승인), 확인 시작, 결과 지우기. 진행 상태는 `/api/state`의 `discord`(`phase`: `deck`, `discord`, `done`, `failed`) |
 
 실패 시 `{"error": "사유"}`와 함께 4xx/5xx 상태 코드를 반환한다: 토큰 불일치 401, Host/Origin 검증 실패 403, 대상 덱/명령 없음 404, 요청 형식 오류 400, Nix 관리형 설정 충돌 409, 파일 I/O 또는 커맨드 실행 실패 500. `set`은 커맨드 실행이 실패로 끝나도 500을 반환한다. 정본은 `src/app/host/src/console.rs` 상단 주석에 있다.
 
@@ -704,6 +719,8 @@ toss-connector console         # 브라우저로 열기 (토큰 자동 첨부)
 | UI → 데몬 | `pair_start`, `pair_stop` | 페어링 모드 활성화·비활성화(중지 시 대기 중인 호스트에 `rejected` 전송) |
 | UI → 데몬 | `pair_accept`, `pair_reject` | 페어링 요청 수락(`code`: 화면에 떠 있던 숫자. 현재 후보 코드와 다르면 데몬이 무시), 거절 |
 | UI → 데몬 | `host_forget` | 페어링 삭제(`id`) |
+| 데몬 → UI | `vault` | 덱 금고 상태(`services`: 서비스별 키 보관·연결 여부와 허용한 호스트, `asking`: 화면에서 허용 여부를 묻는 중인 요청). 키 값은 포함하지 않는다 |
+| UI → 데몬 | `vault_answer`, `vault_revoke`, `vault_forget` | 묻는 중인 요청에 답하기(`allow`), 호스트의 금고 사용 허용 해제(`service`, `host`), 서비스 키 삭제(`service`) |
 
 **`hosts` 페이로드 구성**
 
@@ -720,7 +737,7 @@ toss-connector console         # 브라우저로 열기 (토큰 자동 첨부)
 - **덱이 표시 중인 메트릭을 호스트에 구독 요청한다(`watch`).** 데몬이 레이아웃 내 리소스 미터 위젯들이 고른 항목을 호스트별로 집계해(`Layout::watched`), 호스트 연결 시와 레이아웃 변경 시 전송한다. 덱 자체 리소스 위젯 항목은 데몬이 직접 측정한다.
 - **스위치와 노브는 사용자 조작 결과를 낙관적으로 선표시한다.** 값을 설정한 뒤 1.5초 동안은 사용자가 선택한 값을 보여 주다가 이후 다시 호스트가 보고한 값으로 복귀한다. 그사이에 호스트가 새 값을 알려 오면 그대로 이어받고, 변화가 없으면(커맨드 실행 실패 등) 기존 값으로 돌아간다. 연속 노브는 드래그 중 0.09초 스로틀링으로 전송하고, 손을 뗄 때 최종값을 한 번 더 전송한다. **위젯은 `host.caps`를 확인해 미허용 액션을 호출하는 컨트롤을 비활성화한다.**
 - **위젯마다 대상 호스트를 지정한다.** 위젯 설정 `host`에 호스트 ID가 지정돼 있으면 해당 호스트만 추적·제어한다(미연결 시 오프라인으로 표시). 비어 있으면 연결된 첫 호스트를 따른다. 추가 시 선택한다([03-userland-guide.md](03-userland-guide.md) 3.16절 "레이아웃 편집").
-- 관련 코드(`src/app/tossd/src/hosts/`): `session.rs`(단일 세션 — 헬로, 수락 판정, 메시지 수신), `pairing.rs`(페어링 모드·후보·상호 확인), `blob.rs`(청크 기반 앨범 아트 조립), `store.rs`(`hosts.json`과 `key`), `mod.rs`(호스트 상태 `Hosts`, UI 전달 모델, 액션 라우팅). 변경 사항은 `Events`(`hosts`, `values`, `meters`, `result`, `sleep`)로 데몬 코어에 전달하며 `src/app/tossd/src/state.rs`의 `Shared`가 받아 UI로 푸시한다.
+- 관련 코드(`src/app/tossd/src/hosts/`): `session.rs`(단일 세션 — 헬로, 수락 판정, 메시지 수신), `pairing.rs`(페어링 모드·후보·상호 확인), `blob.rs`(청크 기반 앨범 아트 조립), `store.rs`(`hosts.json`과 `key`), `vault.rs`(덱 금고. 4.15절), `mod.rs`(호스트 상태 `Hosts`, UI 전달 모델, 액션 라우팅). 변경 사항은 `Events`(`hosts`, `values`, `meters`, `result`, `sleep`, `vault`)로 데몬 코어에 전달하며 `src/app/tossd/src/state.rs`의 `Shared`가 받아 UI로 푸시한다.
 - 덱 측 로그는 `/var/log/tossd.log`의 `host:` 접두사 라인이다(페어링, 연결, 종료, 거절, 권한 변경, 액션 실패). 재생 정보 같은 상태 페이로드는 남기지 않는다.
 
 ## 4.12 확장 가이드
@@ -781,13 +798,14 @@ toss-connector console         # 브라우저로 열기 (토큰 자동 첨부)
 | 다중 호스트 | 덱은 여러 호스트와 페어링·동시 연결 가능. 위젯별로 대상 호스트 지정(추가 시 선택, 미지정 시 연결된 첫 호스트) | 위젯 추가 후 대상 호스트 변경 UI. 실제 다중 호스트 동시 접속 실기기 테스트 |
 | 다중 덱 | 호스트는 여러 덱과 페어링 가능하나 한 번에 1대만 연결 | 다중 덱 동시 연결 |
 | 지원 OS | 리눅스(MPRIS) | Windows, macOS |
-| 제공 기능 | 리소스 모니터링(CPU, 메모리, GPU, 디스크, 네트워크, 온도). 재생 정보·앨범 아트 표시, 재생/일시정지, 트랙 이동, ±5초 시크, 반복, 셔플. PC 등록 명령 실행, 스위치, 단계 노브, 연속 노브(상태는 PC가 보고) | 볼륨·키 입력 같은 내장 액션(현재는 셸 커맨드 등록으로 대체), 진행 바 터치 시크 등 |
+| 제공 기능 | 리소스 모니터링(CPU, 메모리, GPU, 디스크, 네트워크, 온도). 재생 정보·앨범 아트 표시, 재생/일시정지, 트랙 이동, ±5초 시크, 반복, 셔플. PC 등록 명령 실행, 스위치, 단계 노브, 연속 노브(상태는 PC가 보고). 덱의 웹페이지 버튼으로 PC 브라우저에서 주소 열기 | 볼륨·키 입력 같은 내장 액션(현재는 셸 커맨드 등록으로 대체), 진행 바 터치 시크 등 |
 | 스위치·노브 상태 | 호스트가 등록된 모든 상태 조회 커맨드를 주기마다 실행 | 덱 레이아웃에 실제 배치된 명령만 폴링(리소스의 `watch`와 같은 구독 방식). 상태 변경 이벤트를 기다리는 push형 상태 커맨드 |
 | 리소스 수집 | 리눅스 CPU·메모리·GPU(AMD, NVIDIA)·디스크·네트워크·온도·팬·배터리. 덱 구독 항목만 측정 | Intel GPU 사용률, 프로세스별 사용량, 인터페이스·디스크 개별 속도, Windows·macOS 지원 |
 | 권한·명령 관리 | 사용자가 웹 콘솔이나 CLI로 관리. NixOS 모듈 설정으로 고정 가능(`strict`) | 덱별로 다른 NixOS 고정 권한 지정(현재는 모든 덱 공통). 관리형 명령과 이름 충돌로 가려진 사용자 명령을 CLI에서 삭제하는 기능(현재는 `commands.json` 직접 수정 필요) |
 | 호스트 페어링 UI | 웹 콘솔에서 검증 코드 확인 후 수락, 또는 터미널 `y` 입력 | 페어링 요청 시 데스크톱 알림 |
 | 자동 실행 | NixOS 모듈(`programs.toss-connector.enable`)이 systemd 사용자 서비스로 등록해 로그인 시 자동 실행 | 타 리눅스 배포판(유닛 파일 수동 배치), Windows, macOS |
 | 절전 | 덱 설정 또는 `toss-connector sleep`으로 진입, `toss-connector wake`로 웨이크업(Wi-Fi 매직 패킷) | 이더넷 웨이크업(안 됨), 터치 웨이크업, 깊은 절전 ([01-findings.md](01-findings.md)). 웨이크업 대상이 해당 덱 키가 맞는지 검증(현재 `wake`는 알려진 덱 IP 중 아무나 접속을 받으면 깨어난 것으로 간주) |
+| 외부 연동 | 덱 금고에 Discord 앱 키를 보관하고, 덱이 토큰을 발급·갱신해 PC에 빌려줌(4.15절) | Discord 음소거·헤드셋 끄기 위젯(토큰은 빌릴 수 있으나 음성 제어는 아직 없음). 실제 Discord 앱과의 승인·인증 확인. 덱이 인터넷에 연결되지 않았을 때 PC를 거쳐 토큰 주소로 중계 |
 | 블루투스 | 미지원 | 추후 검토 |
 
 **설계 확정 사항 (2026-11-17)**
@@ -858,3 +876,78 @@ toss-connector console         # 브라우저로 열기 (토큰 자동 첨부)
 - 가젯 구성을 변경하면 USB 재열거가 일어나므로 SSH가 한 번 끊긴다. initramfs 수정 사항이므로 부트 이미지를 다시 플래싱해야 한다.
 
 실기기에서 검증하지 않았으나 표준 리눅스 USB 가젯(configfs) 절차 그대로다.
+
+## 4.15 덱 금고: 외부 연동 키 보관과 토큰 대여
+
+Discord처럼 외부 서비스와 연동하는 기능에 필요한 키를 덱에 보관한다. PC가 바뀌어도 같은 키를 다시 입력하지 않고 쓰기 위해서다.
+
+**긴 수명의 비밀 값은 덱 밖으로 내보내지 않고, PC에는 그 값으로 발급한 짧은 수명의 토큰만 빌려준다.** 덱과 PC 사이의 통신은 이미 Noise로 암호화되고 페어링한 키로 서로를 인증하므로(4.3절), 키를 보낼 때 따로 암호화하지 않는다.
+
+### 덱이 보관하는 값
+
+| 값 | 누가 보내는가 | PC에 보내는가 |
+|---|---|---|
+| `client_id` | PC(웹 콘솔, `toss-connector discord set`) | 공개 값이라 `begin`으로 알려 준다 |
+| `client_secret`, `redirect_uri` | PC | 보내지 않는다. 덱이 토큰 주소에 요청할 때만 쓴다 |
+| `refresh_token` | 덱이 토큰을 처음 발급받을 때 생긴다 | 보내지 않는다 |
+| `access_token`, `expires_at`, `scope` | 덱이 발급·갱신한다 | 빌려준다(`token`). PC는 메모리에만 둔다 |
+
+- **저장**: `/data/toss/vault.json`에 ChaCha20-Poly1305로 암호화해 두고, 키는 `/data/toss/vault.key`에 둔다. 둘 다 소유자 전용(0600)이다. 재플래싱해도 남는다(03의 3.15절 "기기에만 남는 데이터").
+- **보호 범위**: 같은 기기에 키를 두므로 백업 이미지 같은 파일 사본이 새어 나갔을 때만 보호된다. 기기의 root 권한을 얻으면 읽을 수 있다. 지금 덱은 root에 비밀번호가 없고 SSH가 LAN에 열려 있으므로, 실질적인 보호는 SSH를 끄는 쪽에서 온다(설정 → `NETWORK` → `SSH`).
+- **PC 쪽**: 서비스 키를 덱으로 보내기만 하고 설정 디렉터리에 저장하지 않는다. 빌린 토큰도 파일이나 로그에 남기지 않는다.
+
+### 어느 PC가 쓸 수 있는가
+
+4.5절의 권한은 PC가 덱을 얼마나 믿는지를 PC가 정하는 것이다. **금고는 방향이 반대라서, 덱 사용자가 덱에서 정한다.**
+
+- 허용하지 않은 PC가 금고를 쓰려 하면 덱 화면에 확인 다이얼로그가 뜬다(`DISCORD ACCESS`). `ALLOW`를 누르면 그 PC를 기억하고, `DENY`나 바깥 영역을 누르면 거절한다.
+- 덱은 사용자가 답할 때까지 최대 60초(`VAULT_ASK_WAIT`) 응답을 미룬다. 한 번에 하나만 묻고, 묻는 중에 온 다른 요청은 `busy`로 거절한다.
+- 거절한 PC의 같은 서비스 요청은 5분 동안 묻지 않고 거절한다(다이얼로그를 반복해서 띄우지 못하게).
+- 키 저장(`put`)과 삭제(`forget`)에도 같은 허용이 필요하다. 허용하지 않은 PC는 키를 덮어쓸 수 없다.
+- 허용은 덱 설정 → `INTEGRATIONS` → 서비스에서 PC별로 해제(`REVOKE`)할 수 있다. 페어링을 삭제하면 그 PC의 허용도 지운다.
+
+### 요청 (`vault`, `vault_reply`)
+
+| `op` | `args` | 성공 시 `data` |
+|---|---|---|
+| `put` | `{"client_id", "client_secret", "redirect_uri"}`. `client_id`는 숫자, 나머지는 공백 없는 문자, `redirect_uri`는 비우거나 `http://`·`https://` 주소 | `{"ok": true}`. `client_id`가 바뀌면 이전 앱의 토큰을 지운다 |
+| `forget` | — | `{"ok": true}`. 키와 토큰을 지운다(허용 목록은 남긴다) |
+| `begin` | — | `{"client_id", "scopes"}` |
+| `token` | `{"code"}`(처음 연결할 때) 또는 없음 | `{"access_token", "expires_at", "scope"}` |
+
+- `token`에 `code`가 있으면 덱이 `authorization_code`로 새로 발급받는다. 없으면 보관한 토큰의 남은 시간이 1시간보다 길 때 그대로 빌려주고, 짧으면 `refresh_token`으로 갱신한 뒤 빌려준다.
+- 토큰 요청은 한 번에 하나씩 처리한다. 갱신할 때마다 refresh 토큰이 바뀔 수 있어, 동시에 갱신하면 하나가 실패하기 때문이다.
+- 서비스가 갱신을 거절하면(`invalid_grant` 등) 덱은 토큰을 지우고 `not_linked`로 답한다. 앱 키는 남긴다.
+- 덱은 호스트당 금고 요청을 동시에 4개까지 처리하고, 넘으면 `busy`로 거절한다.
+
+### Discord
+
+| 항목 | 값 |
+|---|---|
+| 토큰 주소 | `https://discord.com/api/oauth2/token` (덱이 Wi-Fi로 직접 요청한다) |
+| 권한 범위 | `rpc`, `rpc.voice.read`, `rpc.voice.write` |
+| PC 쪽 연결 | 이 PC에서 실행 중인 Discord 앱의 로컬 RPC(IPC 소켓 `$XDG_RUNTIME_DIR/discord-ipc-0`~`9`. Flatpak, Snap 위치 포함) |
+
+**처음 설정하는 순서**
+
+1. [Discord 개발자 포털](https://discord.com/developers/applications)에서 앱을 만든다.
+2. 앱의 OAuth2 화면에서 Client ID와 Client Secret을 확인하고, Redirects에 `http://localhost`를 등록한다.
+3. 앱의 테스터 목록에 본인 계정을 추가한다. 음성 권한(`rpc.voice.*`)은 Discord가 승인한 앱이나 그 앱의 테스터(최대 50명)에게만 열려 있다.
+4. PC의 웹 콘솔 "외부 연동"에서 키를 입력하고 `덱에 저장`을 누른다(또는 `toss-connector discord set`). 이 PC가 처음이면 덱 화면에서 `ALLOW`를 누른다.
+5. `Discord 연결`을 누른다(또는 `toss-connector discord link`). 이 PC의 Discord 앱에 승인 창이 뜬다. 브라우저 로그인은 필요 없다.
+
+**연결 절차** (`src/app/host/src/discord.rs`)
+
+1. PC가 덱에서 `client_id`와 권한 범위를 받는다(`begin`).
+2. PC가 Discord 앱에 `AUTHORIZE`를 보내면 앱이 승인 창을 띄우고, 승인하면 승인 코드를 돌려준다.
+3. PC가 승인 코드를 덱에 넘기면(`token`의 `code`) 덱이 토큰을 발급받아 `refresh_token`을 보관하고 `access_token`만 빌려준다.
+4. PC가 빌린 토큰으로 Discord 앱에 `AUTHENTICATE`해 확인한다.
+
+토큰은 Discord 계정과 앱에 묶이고 PC와는 무관하다. 그래서 같은 계정이면 다른 PC에서는 승인 창 없이 `토큰 확인`(`toss-connector discord check`)만으로 쓸 수 있다. 음소거·헤드셋 끄기 같은 음성 제어는 아직 만들지 않았다.
+
+### 관련 코드와 검증
+
+- 덱: `src/app/tossd/src/hosts/vault.rs`(보관, 암호화, 허용, 토큰 발급·갱신), `hosts/session.rs`(요청마다 별도 스레드에서 처리), UI는 `shell/VaultAsk.qml`(허용 다이얼로그)과 `shell/VaultPage.qml`(설정).
+- PC: `src/app/host/src/vault.rs`(데몬 세션으로 요청 중계), `discord.rs`, `console.rs`(웹 콘솔 API와 `discord` CLI). `discord` CLI는 실행 중인 `toss-connector`의 웹 콘솔 API를 호출하므로 웹 콘솔을 끄면(`--no-console`) 쓸 수 없다.
+- 확인한 것(2026-11-19): 덱 단위 테스트(암호화 저장과 0600 권한, 다른 키로 열 수 없는 파일의 백업, 허용·거절·busy·연결 끊김 시 질문 회수, 키 형식 검증, 가짜 토큰 주소로 발급·재사용·갱신·갱신 토큰 교체·거절 시 연결 해제), 덱 통합 테스트(호스트 요청 → 화면 질문 → 허용 → 호스트와 화면에 상태 반영, 해제와 삭제), PC 단위 테스트(가짜 Discord IPC로 HANDSHAKE, ping 응답, 다른 이벤트 건너뛰기, 오류 응답). PC에서 덱 데몬과 커넥터를 실제로 띄워 페어링 → `discord set`(덱 화면 질문에 `ALLOW`) → 상태 조회 → `check`(승인 전이라 `not_linked`) → 허용 해제 → `forget`까지 확인했고, 비밀 값이 덱 파일·PC 설정 디렉터리·로그 어디에도 평문으로 남지 않는 것을 확인했다.
+- 확인하지 못한 것: 실제 Discord 앱과 Discord 토큰 주소를 거친 승인·발급·인증(앱 키가 필요하다), 기기(aarch64)에서의 HTTPS 요청, 덱 화면의 다이얼로그와 설정 화면(문법 검사만 함).

@@ -26,6 +26,14 @@
 //!                                                            (변경 시 전체 전송. 형식은 `toss-proto`의 `MetricInfo`).
 //!   {"type":"meter_values","hosts":{"@deck":{"cpu":12,"mem":301989888},"<호스트 id>":{..}}}
 //!                                                            리소스 현재 값. **자원 미터 위젯이 현재 표시 중인 항목만** 포함된다(약 1초 간격, 변경 시 전송).
+//!   {"type":"vault","services":[{"id":"discord","title":"Discord","registered":true,"linked":true,"hosts":["<호스트 id>"]}],
+//!    "asking":{"host":"<호스트 id>","name":"pc","service":"discord","title":"Discord"}}
+//!                                                            덱 금고 상태(키 값은 포함하지 않음. `hosts/vault.rs`의 `VaultState`). `registered`는 서비스 키 보관 여부,
+//!                                                            `linked`는 토큰을 갱신할 수 있는 상태인지, `hosts`는 금고를 쓰도록 허용한 호스트다.
+//!                                                            `asking`은 허용하지 않은 호스트가 금고를 쓰려 해서 화면에서 답을 기다리는 요청이다(없으면 `null`).
+//!   {"type":"icons","icons":{"https://example.com/":"data:image/png;base64,.."}}
+//!                                                            웹페이지 아이콘 버튼(`web.icon`)이 표시할 사이트 아이콘(주소 -> `data:` URI. 가져오지 못한 주소는 생략).
+//!                                                            덱이 직접 가져와 보관한다(`icons.rs`). 변경 시 전체 전송
 //! 클라이언트 -> 데몬
 //!   {"type":"brightness","value":120,"keep":true}            화면 밝기 변경. `keep`이 true이면 영구 저장해 다음 부팅 시에도 복원한다
 //!                                                            (드래그 중에는 `keep` 없이 보내고, 손을 뗄 때 `keep: true`로 보낸다).
@@ -46,6 +54,9 @@
 //!                                                            (`hosts.pairing.candidate.code`)이며, 현재 후보와 다르면 데몬이 무시한다.
 //!   {"type":"pair_reject"}                                   페어링 요청 거절
 //!   {"type":"host_forget","id":".."}                         해당 호스트의 페어링 삭제
+//!   {"type":"vault_answer","allow":true}                     `vault.asking`에 답한다(`allow`가 true면 그 호스트가 금고를 쓰도록 허용)
+//!   {"type":"vault_revoke","service":"discord","host":".."}  호스트의 금고 사용 허용 해제
+//!   {"type":"vault_forget","service":"discord"}              서비스 키와 토큰을 덱에서 삭제
 //!   배치 편집(UI 편집 모드. `target`은 `"widget"`(페이지에 놓인 복합 위젯) 또는 `"rack"`). 데몬은 규칙에 맞는 요청만 수락해
 //!   저장한 뒤 모든 클라이언트에 새 `layout`을 브로드캐스트한다. 규칙 위반이거나 필드가 잘못된(누락/타입 오류) `layout_*` 메시지는 무시하고
 //!   현재 `layout`을 다시 내려 보내 UI 상태를 바로잡는다.
@@ -92,7 +103,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::device::DeviceState;
-use crate::hosts::{HostsState, Values};
+use crate::hosts::{HostsState, Values, VaultState};
+use crate::icons::IconMap;
 use crate::layout::{AppInfo, Edit, Layout, Target};
 use crate::state::{MeterInfos, MeterValues};
 use crate::sys::SysState;
@@ -112,6 +124,8 @@ pub enum ServerMsg<'a> {
     Values { hosts: &'a Values },
     Meters { hosts: &'a MeterInfos },
     MeterValues { hosts: &'a MeterValues },
+    Vault(&'a VaultState),
+    Icons { icons: &'a IconMap },
 }
 
 #[derive(Deserialize)]
@@ -143,6 +157,9 @@ pub enum ClientMsg {
     PairAccept { code: String },
     PairReject,
     HostForget { id: String },
+    VaultAnswer { allow: bool },
+    VaultRevoke { service: String, host: String },
+    VaultForget { service: String },
     LayoutMove { target: Target, id: u32, page: usize, x: u32, y: u32 },
     LayoutResize { id: u32, w: u32, h: u32 },
     LayoutRename { id: u32, label: String },

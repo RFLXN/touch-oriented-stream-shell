@@ -29,6 +29,9 @@
 //!
 //! 대용량 데이터(앨범 아트)는 단일 메시지에 들어가지 않으므로 청크(blob)로 분할해 보낸다. 청크 전송 사이에 다른 메시지가 끼어들 수 있다.
 //!
+//! 덱 금고: 외부 연동(현재는 Discord)의 키는 덱에 보관한다. 호스트는 키를 덱에 보내기만 하고(vault put) 다시 받지 못하며,
+//! 필요할 때 그 키로 발급한 짧은 수명의 토큰만 빌린다(vault token). 어느 호스트가 금고를 쓸 수 있는지는 덱 사용자가 덱 화면에서 정한다.
+//!
 //! 미구현: 한 호스트가 여러 경로를 동시에 유지하며 즉시 전환하는 기능(현재는 끊기면 저장된 주소 목록으로 재접속).
 
 pub mod secure;
@@ -104,6 +107,20 @@ pub enum HostMsg {
     Caps { caps: Vec<String> },
     /// 덱이 요청한 액션의 처리 결과. 권한이 없으면 error에 ERROR_NOT_ALLOWED가 담긴다.
     Result { id: u64, ok: bool, error: String },
+    /// 덱 금고 요청. id는 vault_reply와 매칭하는 시퀀스 번호, op는 VAULT_* 중 하나, service는 SERVICE_* 중 하나.
+    /// 이 호스트가 아직 금고를 쓸 수 없으면 덱이 화면에 허용 여부를 묻고, 사용자가 답할 때까지(최대 VAULT_ASK_WAIT) 응답을 미룬다.
+    ///   put     args: 서비스 키 필드(Discord: {"client_id", "client_secret", "redirect_uri"}). 덱은 저장만 하고 키를 돌려주지 않는다
+    ///   forget  서비스 키와 토큰을 모두 삭제한다
+    ///   begin   연동에 필요한 공개 값을 받는다. data: {"client_id", "scopes": [..]}
+    ///   token   토큰을 빌린다. args에 {"code"}가 있으면 그 승인 코드로 새로 발급받고, 없으면 덱이 보관한 토큰을 주거나 갱신해 준다.
+    ///           data: {"access_token", "expires_at"(유닉스 초), "scope"}. 호스트는 받은 토큰을 메모리에만 둔다.
+    Vault {
+        id: u64,
+        op: String,
+        service: String,
+        #[serde(default)]
+        args: serde_json::Value,
+    },
     Ping,
     #[serde(other)]
     Unknown,
@@ -141,10 +158,57 @@ pub enum DeckMsg {
         #[serde(default)]
         args: serde_json::Value,
     },
+    /// vault 요청의 응답. 실패하면 error에 VAULT_ERR_* 또는 사유 문장이 담긴다.
+    VaultReply {
+        id: u64,
+        ok: bool,
+        #[serde(default)]
+        error: String,
+        #[serde(default)]
+        data: serde_json::Value,
+    },
+    /// 금고 상태(키 값은 포함하지 않음). 접속 직후와 상태가 바뀔 때마다 전체를 보낸다.
+    VaultState { services: Vec<VaultService> },
     Ping,
     #[serde(other)]
     Unknown,
 }
+
+/// 덱 금고에 보관하는 서비스 하나의 상태 (DeckMsg::VaultState)
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct VaultService {
+    /// SERVICE_* 중 하나
+    pub id: String,
+    pub title: String,
+    /// 서비스 키가 저장되어 있는지
+    pub registered: bool,
+    /// 토큰을 갱신할 수 있는 상태인지(승인을 한 번 받아 refresh 토큰을 보관 중)
+    pub linked: bool,
+    /// 이 호스트가 금고를 쓸 수 있는지(덱 사용자가 허용함)
+    pub allowed: bool,
+}
+
+/// 덱 금고 요청 종류 (HostMsg::Vault의 op)
+pub const VAULT_PUT: &str = "put";
+pub const VAULT_FORGET: &str = "forget";
+pub const VAULT_BEGIN: &str = "begin";
+pub const VAULT_TOKEN: &str = "token";
+
+/// 덱 금고가 다루는 서비스 (HostMsg::Vault의 service)
+pub const SERVICE_DISCORD: &str = "discord";
+
+/// 덱 금고 오류 (DeckMsg::VaultReply의 error). 그 밖의 실패는 사유 문장이 그대로 담긴다.
+/// denied: 덱 사용자가 거절함, busy: 다른 요청을 묻는 중, timeout: 덱 사용자가 답하지 않음,
+/// not_set: 서비스 키가 없음, not_linked: 승인을 받은 적이 없거나 만료됨, unknown: 모르는 서비스나 요청
+pub const VAULT_ERR_DENIED: &str = "denied";
+pub const VAULT_ERR_BUSY: &str = "busy";
+pub const VAULT_ERR_TIMEOUT: &str = "timeout";
+pub const VAULT_ERR_NOT_SET: &str = "not_set";
+pub const VAULT_ERR_NOT_LINKED: &str = "not_linked";
+pub const VAULT_ERR_UNKNOWN: &str = "unknown";
+
+/// 덱이 화면에서 금고 사용 허용 여부를 묻고 기다리는 최대 시간. 호스트는 이보다 조금 더 길게 응답을 기다린다.
+pub const VAULT_ASK_WAIT: Duration = Duration::from_secs(60);
 
 /// 덱의 호스트 수락 상태 (DeckMsg::Hello의 status)
 pub const STATUS_PAIRED: &str = "paired";
@@ -180,6 +244,9 @@ pub const ACTION_COMMAND_RUN: &str = "command.run";
 /// 범위 값은 범위 및 단위(step)에 맞춰 보정한 뒤 그 값에 해당하는 등록된 커맨드를 실행한다.
 /// result는 요청을 받아 실행을 위임했다는 뜻이며, 실제 반영 여부는 뒤따르는 command_value로 확인한다.
 pub const ACTION_COMMAND_SET: &str = "command.set";
+/// 호스트의 기본 브라우저로 웹페이지를 연다. args: {"url": "https://..."}
+/// 호스트는 http:// 또는 https:// 주소만 연다(다른 스킴은 그 스킴을 처리하는 프로그램을 실행할 수 있으므로 거절한다).
+pub const ACTION_WEB_OPEN: &str = "web.open";
 
 /// 반복 모드 (Media.loop_mode, media.loop의 mode)
 pub const LOOP_NONE: &str = "none";
@@ -193,6 +260,7 @@ pub const CAP_MEDIA_INFO: &str = "media.info";
 pub const CAP_MEDIA_CONTROL: &str = "media.control";
 pub const CAP_RESOURCE_INFO: &str = "resource.info";
 pub const CAP_COMMAND_RUN: &str = "command.run";
+pub const CAP_WEB_OPEN: &str = "web.open";
 
 /// 권한이 없는 액션을 요청했을 때 반환되는 result의 error
 pub const ERROR_NOT_ALLOWED: &str = "not_allowed";
@@ -202,6 +270,7 @@ pub fn action_cap(action: &str) -> Option<&'static str> {
     match action {
         ACTION_MEDIA_PLAY_PAUSE | ACTION_MEDIA_NEXT | ACTION_MEDIA_PREV | ACTION_MEDIA_SEEK | ACTION_MEDIA_SHUFFLE | ACTION_MEDIA_LOOP => Some(CAP_MEDIA_CONTROL),
         ACTION_COMMAND_RUN | ACTION_COMMAND_SET => Some(CAP_COMMAND_RUN),
+        ACTION_WEB_OPEN => Some(CAP_WEB_OPEN),
         _ => None,
     }
 }
@@ -397,12 +466,21 @@ mod tests {
     }
 
     #[test]
+    fn vault_messages_read_with_their_optional_parts_left_out() {
+        let m: HostMsg = serde_json::from_str(r#"{"t":"vault","id":3,"op":"token","service":"discord"}"#).unwrap();
+        assert_eq!(m, HostMsg::Vault { id: 3, op: VAULT_TOKEN.into(), service: SERVICE_DISCORD.into(), args: serde_json::Value::Null });
+        let m: DeckMsg = serde_json::from_str(r#"{"t":"vault_reply","id":3,"ok":false,"error":"denied"}"#).unwrap();
+        assert_eq!(m, DeckMsg::VaultReply { id: 3, ok: false, error: VAULT_ERR_DENIED.into(), data: serde_json::Value::Null });
+    }
+
+    #[test]
     fn every_action_needs_a_cap_and_unknown_ones_have_none() {
         for a in [ACTION_MEDIA_PLAY_PAUSE, ACTION_MEDIA_NEXT, ACTION_MEDIA_PREV, ACTION_MEDIA_SEEK, ACTION_MEDIA_SHUFFLE, ACTION_MEDIA_LOOP] {
             assert_eq!(action_cap(a), Some(CAP_MEDIA_CONTROL));
         }
         assert_eq!(action_cap(ACTION_COMMAND_RUN), Some(CAP_COMMAND_RUN));
         assert_eq!(action_cap(ACTION_COMMAND_SET), Some(CAP_COMMAND_RUN));
+        assert_eq!(action_cap(ACTION_WEB_OPEN), Some(CAP_WEB_OPEN));
         assert_eq!(action_cap("exec"), None);
         assert_eq!(action_cap(""), None);
     }

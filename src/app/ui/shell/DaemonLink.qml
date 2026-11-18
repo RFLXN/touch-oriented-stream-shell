@@ -36,6 +36,9 @@
 //                 `"@deck"`은 덱 자신, 나머지는 메트릭을 제공하는 호스트(PC)다. 자원 미터 위젯 추가 시 이 목록에서 선택한다.
 //   meterValues   리소스 현재 값  {"@deck":{"cpu":12,..},"<호스트 id>":{..}}  — 자원 미터 위젯이 표시 중인 항목만 전달된다.
 //   results       위젯 액션의 최근 결과  {"<위젯 id>":{"seq":..,"ok":..,"error":..,"at":..(수신 시각 `Date.now()`)}}
+//   vault         덱 금고 상태  {"services":[{"id":"discord","title":"Discord","registered":..,"linked":..,"hosts":[허용한 호스트 id..]}],
+//                               "asking":{"host":..,"name":..,"service":..,"title":..} 또는 null(허용 여부를 묻는 중인 요청)}  (키 값은 오지 않는다)
+//   icons         사이트 아이콘  {"<주소>":"data:image/png;base64,.."}  — 웹페이지 아이콘 버튼이 표시한다(가져오지 못한 주소는 없음)
 // 송신 메서드:
 //   action(name, args, hostId, widget)   호스트에 액션 전송. `name`은 `"media.play_pause"` 등(`src/app/proto`의 `ACTION_*`), `args`는 인자 객체.
 //                                        `hostId`가 비어 있으면 연결된 첫 번째 호스트로 전송한다. `widget`(위젯 ID)을 넘기면 결과가 `results`로 돌아온다.
@@ -49,6 +52,8 @@
 //   pairStart() / pairStop()             페어링 모드 시작 / 종료
 //   pairAccept(code) / pairReject()      페어링 요청 수락(화면에 표시된 `code` 전달) / 거절
 //   hostForget(id)                       호스트 페어링 삭제
+//   vaultAnswer(allow)                   `vault.asking`에 답하기(true면 그 호스트가 금고를 쓰도록 허용)
+//   vaultRevoke(service, host) / vaultForget(service)   호스트의 금고 사용 허용 해제 / 서비스 키와 토큰 삭제
 //   배치 편집(편집 모드 전용. 데몬이 수락하면 새 `pages`가 내려옴. `target`은 `"widget"` 또는 `"rack"`, 삭제 시에는 `"button"`도 허용):
 //   layoutMove(target, id, page, x, y)   배치 이동(`page`가 페이지 수와 같으면 새 페이지 생성)
 //   layoutResize(id, w, h) / layoutRename(id, label)   랙 크기 변경 / 라벨 변경
@@ -78,6 +83,8 @@ Item {
     property var meters: ({})
     property var meterValues: ({})
     property var pairing: ({ active: false, candidate: null })
+    property var vault: ({ services: [], asking: null })
+    property var icons: ({})
     readonly property var host: {
         for (const h of hosts)
             if (h.connected)
@@ -102,6 +109,9 @@ Item {
     function pairAccept(code) { send({ type: "pair_accept", code: code }) }
     function pairReject() { send({ type: "pair_reject" }) }
     function hostForget(id) { send({ type: "host_forget", id: id }) }
+    function vaultAnswer(allow) { send({ type: "vault_answer", allow: !!allow }) }
+    function vaultRevoke(service, host) { send({ type: "vault_revoke", service: service, host: host }) }
+    function vaultForget(service) { send({ type: "vault_forget", service: service }) }
     function layoutMove(target, id, page, x, y) { send({ type: "layout_move", target: target, id: id, page: page, x: x, y: y }) }
     function layoutResize(id, w, h) { send({ type: "layout_resize", id: id, w: w, h: h }) }
     function layoutRename(id, label) { send({ type: "layout_rename", id: id, label: label }) }
@@ -146,6 +156,8 @@ Item {
             case "values": link.values = m.hosts; break
             case "meters": link.meters = m.hosts; break
             case "meter_values": link.meterValues = m.hosts; break
+            case "vault": link.vault = { services: m.services, asking: m.asking }; break
+            case "icons": link.icons = m.icons; break
             case "result":
                 link.results = Object.assign({}, link.results, { [m.widget]: { seq: m.seq, ok: m.ok, error: m.error, at: Date.now() } })
                 break

@@ -21,7 +21,7 @@ push_ui() {
 }
 
 push_tossd() {
-  (cd "$top/src/app/tossd" && CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=rust-lld \
+  (cd "$top/src/app/tossd" && CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=rust-lld CC_aarch64_unknown_linux_musl=clang AR_aarch64_unknown_linux_musl=llvm-ar \
     cargo build --release --target aarch64-unknown-linux-musl)
   "$here/tf-ssh.sh" --put "$top/dist/cargo/aarch64-unknown-linux-musl/release/tossd" /usr/bin/tossd.new
   "$here/tf-ssh.sh" 'chmod 755 /usr/bin/tossd.new && mv /usr/bin/tossd.new /usr/bin/tossd && rc-service tossd restart >/dev/null && tail -n 2 /var/log/tossd.log'

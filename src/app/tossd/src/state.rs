@@ -8,6 +8,7 @@
 //!   덱 자체 리소스   1초마다 리소스 미터 위젯이 구독 중인 항목만 측정 (`toss-meter`)
 //!   Wi-Fi            `wifi.rs` 스레드가 상태 변경 시마다 갱신
 //!   호스트           `hosts` 스레드들이 변경 시마다 갱신 (`hosts::Events`)
+//!   사이트 아이콘    `icons.rs` 스레드가 배치에 있는 웹페이지 아이콘 버튼의 아이콘을 가져올 때마다 갱신
 
 use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
@@ -21,7 +22,8 @@ use std::time::{Duration, Instant};
 use toss_proto::MetricInfo;
 
 use crate::device::{Device, DeviceState};
-use crate::hosts::{self, Hosts, HostsState};
+use crate::hosts::{self, Hosts, HostsState, VaultState};
+use crate::icons::{self, IconMap};
 use crate::layout::{self, Edit, Layout, SELF_HOST};
 use crate::sys::{collect_sys, SysState};
 use crate::wifi::{self, WifiCmd, WifiState};
@@ -147,6 +149,12 @@ pub struct Shared {
     pub device_state: Versioned<DeviceState>,
     /// 위젯이 호스트에 요청한 액션 결과
     pub results: Versioned<Results>,
+    /// 덱 금고 상태(외부 연동 키 등록 여부, 허용한 호스트, 허용 여부를 묻는 중인 요청)
+    pub vault: Versioned<VaultState>,
+    /// 웹페이지 아이콘 버튼이 표시할 사이트 아이콘(`icons.rs`)
+    pub icons: Versioned<IconMap>,
+    /// 아이콘 작업 스레드에 배치에 있는 주소 목록을 전달하는 채널
+    icons_tx: OnceLock<Mutex<Sender<Vec<String>>>>,
 }
 
 impl Shared {
@@ -160,7 +168,7 @@ impl Shared {
     /// 다만 여러 클라이언트가 동시에 편집할 때 저장/알림 순서가 뒤바뀌지 않도록 작업 전체를 `editing` 뮤텍스로 직렬화한다.
     pub fn edit_layout(&self, edit: Edit) {
         let _editing = self.editing.lock().unwrap();
-        let (accepted, watched) = self.layout.update_with(|layout| {
+        let (accepted, watched, icons) = self.layout.update_with(|layout| {
             let accepted = match layout.edit(&edit) {
                 Ok(()) => Some(layout.clone()),
                 Err(why) => {
@@ -168,13 +176,21 @@ impl Shared {
                     None
                 }
             };
-            (true, (accepted, layout.watched()))
+            (true, (accepted, layout.watched(), layout.icon_urls()))
         });
         if let Some(layout) = accepted {
             self.layout_store.save(&layout);
             eprintln!("layout: 편집 반영: {edit:?}");
         }
         self.watch(watched);
+        self.want_icons(icons);
+    }
+
+    /// 아이콘 작업 스레드에 배치에 있는 웹페이지 아이콘 버튼의 주소 목록을 알린다.
+    fn want_icons(&self, urls: Vec<String>) {
+        if let Some(tx) = self.icons_tx.get() {
+            let _ = tx.lock().unwrap().send(urls);
+        }
     }
 
     /// 현재 배치를 모든 UI 클라이언트에 다시 전송한다(알 수 없는 편집 메시지를 받았을 때 임시 UI 상태를 되돌리기 위함).
@@ -317,6 +333,10 @@ impl hosts::Events for Shared {
     fn sleep(&self) -> Result<(), String> {
         self.try_sleep()
     }
+
+    fn vault(&self, state: VaultState) {
+        self.vault.set(state);
+    }
 }
 
 /// 1초마다 시스템 상태와 기기 상태를 갱신한다.
@@ -356,11 +376,18 @@ pub fn spawn_feeds(shared: &Arc<Shared>, wpa_ctrl: PathBuf, host: Option<(Socket
     feed_own_meters(shared.clone());
     let wifi_state = shared.clone();
     let _ = shared.wifi_tx.set(wifi::spawn(wpa_ctrl, move |state| wifi_state.wifi.set(state)));
+    let icons_to = shared.clone();
+    let icons_tx = icons::spawn(host.as_ref().map(|(_, dir)| icons::dir_under(dir)), move |map| icons_to.icons.set(map));
+    let _ = shared.icons_tx.set(Mutex::new(icons_tx));
     if let Some((addr, data_dir)) = host {
         let _ = shared.hosts_ctl.set(hosts::spawn(addr, data_dir, crate::sys::hostname(), shared.clone()));
     }
-    let watched = shared.layout.lock().watched();
+    let (watched, icons) = {
+        let layout = shared.layout.lock();
+        (layout.watched(), layout.icon_urls())
+    };
     shared.watch(watched);
+    shared.want_icons(icons);
 }
 
 #[cfg(test)]

@@ -8,6 +8,7 @@
 //   value         대상 명령의 현재 값(호스트가 보고한 값, 모르면 `undefined`)
 //   result        이 위젯이 보낸 최근 액션 결과(없으면 `null`)
 //   metrics, metricValues, meterSource   자원 미터 대상 호스트의 메트릭 목록, 현재 값, 소스 이름 및 실시간 수신 여부
+//   icons         사이트 아이콘(주소 -> `data:` URI). 웹페이지 아이콘 버튼(`web.icon`)에만 넣는다
 // 위젯이 요청한 액션(`action`)은 대상 호스트 ID 및 위젯 ID와 함께 데몬으로 전송된다(`link.action`).
 //
 // 호스트 선택 규칙: `widget.settings.host`에 호스트 ID가 지정되어 있으면 해당 호스트만 사용한다
@@ -29,6 +30,7 @@ Loader {
     readonly property var values: link ? link.values : ({})
     readonly property var meters: link ? link.meters : ({})
     readonly property var meterValues: link ? link.meterValues : ({})
+    readonly property var icons: link ? link.icons : ({})
 
     readonly property var sources: ({
         "command.run": "../widgets/CommandWidget.qml",
@@ -39,7 +41,9 @@ Loader {
         "monitor.2x1": "../widgets/MeterWidget.qml",
         "monitor.2x2": "../widgets/MeterWidget.qml",
         "monitor.4x1": "../widgets/MeterWidget.qml",
-        "monitor.4x2": "../widgets/MeterWidget.qml"
+        "monitor.4x2": "../widgets/MeterWidget.qml",
+        "web.button": "../widgets/WebButtonWidget.qml",
+        "web.icon": "../widgets/WebIconWidget.qml"
     })
     readonly property var noValues: ({})
 
@@ -82,6 +86,7 @@ Loader {
     Binding { target: slot.item; property: "metricValues"; value: slot.meterValues[slot.meterKey] || slot.noValues; when: slot.status === Loader.Ready }
     Binding { target: slot.item; property: "meterSource"; value: slot.meterSource; when: slot.status === Loader.Ready }
     Binding { target: slot.item; property: "result"; value: slot.results[slot.widget.id] || null; when: slot.status === Loader.Ready }
+    Binding { target: slot.item; property: "icons"; value: slot.icons; when: slot.status === Loader.Ready && slot.widget.kind === "web.icon" }
     Connections {
         target: slot.item
         function onAction(name, args) {

@@ -4,6 +4,7 @@
 #   inherit (import ./nix/build.nix { inherit pkgs rust; }) buildImage;
 #   images = buildImage { hostname = "toss-front"; ssh.lan = true; };
 # `rust`는 기기 타깃(`aarch64-unknown-linux-musl`)으로 크로스 컴파일 가능한 cargo/rustc 툴체인이다(`tossd` 빌드에 사용).
+# `tossd`의 TLS(`ring`)는 C 코드를 포함하므로 기기 타깃용 C 컴파일러로 clang을 쓴다(libc 헤더 없이 빌드된다).
 # 옵션 기본값은 파일 하단(`sshDefaults` 등 및 `buildImage` 정의)에, 각 옵션 설명은 `docs/02-progress.md` 2.6절에 있다.
 # 출력 디렉터리에는 이미지 3종이 담기며, 개별 파생물(`kernel`, `dtb`, `initramfs`, `rootfs`, `boot`, `recovery`, `tools`, `tossd`)을 `passthru` 속성으로 노출한다.
 #
@@ -97,9 +98,12 @@ let
     nativeBuildInputs = [
       rust
       rustPlatform.cargoSetupHook
+      pkgs.llvmPackages.clang-unwrapped
+      pkgs.llvmPackages.bintools-unwrapped
     ];
     buildPhase = ''
       export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=rust-lld
+      export CC_aarch64_unknown_linux_musl=clang AR_aarch64_unknown_linux_musl=llvm-ar
       cargo build --release --offline --target aarch64-unknown-linux-musl
     '';
     doCheck = true;

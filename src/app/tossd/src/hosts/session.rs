@@ -2,16 +2,18 @@
 //!
 //! 미등록 키에는 거절 `hello`와 사유만 전송한다(덱 주소와 WoWLAN MAC 주소는 비워서 보낸다).
 //! 호스트가 전달하는 문자열(이름, 권한, 명령 및 메트릭 목록)은 길이와 제어 문자를 정제·검증해 수신한다 — UI와 로그에 그대로 노출되기 때문이다.
+//! 금고 요청(`vault`)은 화면에서 허용 여부를 묻거나 토큰 주소에 요청하는 동안 오래 걸릴 수 있으므로 요청마다 별도 스레드에서 처리한다
+//! (그동안에도 다른 메시지는 계속 받는다). 연결이 끊기면 이 호스트가 화면에 띄운 질문을 거두어들인다.
 
 use std::io;
 use std::net::TcpStream;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
 use toss_proto::secure::Conn;
-use toss_proto::{CommandInfo, DeckMsg, HostMsg, MetricInfo, DEAD_AFTER, DENIED_BUSY, DENIED_NOT_PAIRED, PING_EVERY, PROTO_VERSION, STATUS_DENIED, STATUS_PAIRED, STATUS_PAIRING};
+use toss_proto::{CommandInfo, DeckMsg, HostMsg, MetricInfo, DEAD_AFTER, DENIED_BUSY, DENIED_NOT_PAIRED, PING_EVERY, PROTO_VERSION, STATUS_DENIED, STATUS_PAIRED, STATUS_PAIRING, VAULT_ERR_BUSY};
 
 use super::blob::take_piece;
 use super::pairing::Pending;
@@ -27,6 +29,8 @@ const ERROR_MAX: usize = 200;
 /// 호스트당 명령·스위치/노브 값·메트릭 최대 개수
 const COMMANDS_MAX: usize = 256;
 const METRICS_MAX: usize = 512;
+/// 호스트당 동시에 처리하는 금고 요청 최대 개수(넘으면 busy로 거절)
+const VAULT_INFLIGHT_MAX: usize = 4;
 
 /// 접속한 호스트 정보(`hello`에서 파싱)
 struct Peer {
@@ -75,7 +79,7 @@ fn sane_metric(m: &MetricInfo) -> bool {
 
 impl Hosts {
     /// 호스트 연결 세션 1건을 처음부터 끝까지 처리한다. 어떤 사유로든 종료되면 keep-alive 스레드를 중단하고 소켓을 닫는다.
-    pub(super) fn session(&self, stream: TcpStream) -> io::Result<()> {
+    pub(super) fn session(self: &Arc<Self>, stream: TcpStream) -> io::Result<()> {
         stream.set_nodelay(true)?;
         stream.set_read_timeout(Some(DEAD_AFTER))?;
         stream.set_write_timeout(Some(DEAD_AFTER))?;
@@ -177,7 +181,7 @@ impl Hosts {
     }
 
     /// 페어링된 호스트의 일반 세션 루프. 연결이 끊길 때까지 반환하지 않는다.
-    fn serve(&self, conn: &Arc<Conn>, reader: &mut TcpStream, peer: &Peer, caps: Vec<String>) -> io::Result<()> {
+    fn serve(self: &Arc<Self>, conn: &Arc<Conn>, reader: &mut TcpStream, peer: &Peer, caps: Vec<String>) -> io::Result<()> {
         let (old, renamed) = {
             let mut inner = self.inner.lock().unwrap();
             let watch = inner.watch.get(&peer.key).cloned().unwrap_or_default();
@@ -203,6 +207,8 @@ impl Hosts {
             self.save();
         }
         eprintln!("host: 연결됨: {} ({})", peer.name, peer.via);
+        let _ = conn.send(&DeckMsg::VaultState { services: self.vault.status_for(&peer.key) });
+        let inflight = Arc::new(AtomicUsize::new(0));
 
         let ended = loop {
             let msg = match conn.recv::<HostMsg>(reader) {
@@ -287,10 +293,28 @@ impl Hosts {
                         self.events.result(widget, ok, error);
                     }
                 }
+                HostMsg::Vault { id, op, service, args } => {
+                    if inflight.fetch_add(1, Ordering::SeqCst) >= VAULT_INFLIGHT_MAX {
+                        inflight.fetch_sub(1, Ordering::SeqCst);
+                        let _ = conn.send(&DeckMsg::VaultReply { id, ok: false, error: VAULT_ERR_BUSY.into(), data: serde_json::Value::Null });
+                        continue;
+                    }
+                    let (me, conn, key, name, inflight) = (self.clone(), conn.clone(), peer.key.clone(), peer.name.clone(), inflight.clone());
+                    thread::spawn(move || {
+                        let reply = match me.vault.handle(&key, &name, &op, &service, &args) {
+                            Ok(data) => DeckMsg::VaultReply { id, ok: true, error: String::new(), data },
+                            Err(error) => DeckMsg::VaultReply { id, ok: false, error, data: serde_json::Value::Null },
+                        };
+                        inflight.fetch_sub(1, Ordering::SeqCst);
+                        let _ = conn.send(&reply);
+                        me.announce_vault();
+                    });
+                }
                 HostMsg::Hello { .. } | HostMsg::PairConfirm | HostMsg::Ping | HostMsg::Unknown => {}
             }
         };
 
+        self.vault.cancel_asks(&peer.key);
         let mut inner = self.inner.lock().unwrap();
         if let Some(e) = inner.entries.iter_mut().find(|e| e.session == peer.session) {
             e.conn = None;

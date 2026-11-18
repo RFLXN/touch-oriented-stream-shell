@@ -7,6 +7,7 @@
 //   join    선택한 AP 연결 및 저장된 정보 삭제(`WifiJoin`). 화면을 벗어날 때 비밀번호 입력 칸을 비운다.
 //   devices 페어링된 호스트(PC) 목록(`DevicesPage`)   <- `main`의 DEVICES / Paired devices
 //   device  개별 호스트 상세 정보 및 페어링 삭제(`DevicePage`)
+//   vault   덱 금고의 서비스 하나: 키 상태, 허용한 PC와 해제, 키 삭제(`VaultPage`)   <- `main`의 INTEGRATIONS
 //   pair    새 호스트 페어링(`PairPage`). 이 화면에 머무는 동안에만 페어링 모드가 켜진다
 //           (진입 시 시작하고 이탈 시 중지하며, 페어링 완료 또는 타임아웃으로 모드가 종료되면 `devices`로 복귀한다).
 // 실제 제어는 데몬이 담당한다(`link`로 상태 수신 및 명령 전송).
@@ -26,6 +27,10 @@ DropPanel {
     readonly property var pairing: link ? link.pairing : ({})
 
     function show(next) {
+        if (next.startsWith("vault:")) {
+            vaultPage.serviceId = next.slice(6)
+            next = "vault"
+        }
         if (page === "join")
             join.leave()
         if (page === "pair" && next !== "pair")
@@ -61,6 +66,7 @@ DropPanel {
          : page === "devices" ? "DEVICES"
          : page === "pair" ? "PAIR NEW DEVICE"
          : page === "device" && devicePage.host ? devicePage.host.name
+         : page === "vault" && vaultPage.service ? vaultPage.service.title.toUpperCase()
          : "SETTINGS"
     titleSpacing: page === "join" || page === "device" ? 0 : 2
     canGoBack: page !== "main"
@@ -103,6 +109,24 @@ DropPanel {
                                                 root.link.hostForget(id)
                                                 root.show("devices")
                                             }, "")
+    }
+    VaultPage {
+        id: vaultPage
+        visible: root.page === "vault"
+        anchors.fill: parent
+        property string serviceId: ""
+        hosts: root.hosts
+        service: {
+            for (const s of (root.link && root.link.vault ? root.link.vault.services : []))
+                if (s.id === vaultPage.serviceId)
+                    return s
+            return null
+        }
+        onRevoke: (host) => root.link.vaultRevoke(vaultPage.serviceId, host)
+        onForget: root.confirmAsked("FORGET " + (vaultPage.service ? vaultPage.service.title.toUpperCase() : "") + " KEY",
+                                    "The key and tokens kept on this deck will be removed. To use it again, send the key from a PC and link it again.",
+                                    "FORGET",
+                                    () => root.link.vaultForget(vaultPage.serviceId), "")
     }
     PairPage {
         visible: root.page === "pair"

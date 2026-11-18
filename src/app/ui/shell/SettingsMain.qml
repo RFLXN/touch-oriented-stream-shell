@@ -12,6 +12,7 @@
 //   LAYOUT / Edit layout     편집 모드 진입 요청(`editLayout`, 실제 편집은 `Main`과 `Pager`가 처리)
 //   LAYOUT / Reset layout    기본 배치로 초기화. 확인 다이얼로그를 거친다(`confirmAsked`, 다이얼로그는 `Main`의 `ConfirmDialog`)
 //   DEVICES / Paired devices 페어링된 호스트(PC) 목록 화면으로 이동(`opened("devices")`)
+//   INTEGRATIONS / <서비스>  덱 금고에 보관하는 외부 연동 키(현재는 Discord)의 상태. 서비스 상세 화면으로 이동(`opened("vault:<서비스 id>")`)
 //   POWER / Sleep            덱 절전 진입. 확인 다이얼로그를 거치며 Wi-Fi에 연결되어 있을 때만 동작한다
 //                            (절전 중인 덱은 PC에서 WoWLAN으로 깨울 수 있다: `toss-connector wake`).
 //   POWER / Power off        덱 전원 종료. 확인 다이얼로그를 거친다.
@@ -29,6 +30,7 @@ Column {
     readonly property var wifi: link ? link.wifi : ({})
     readonly property var device: link ? link.device : ({})
     readonly property var hosts: link ? link.hosts : []
+    readonly property var vault: link ? link.vault : ({ services: [] })
 
     spacing: 22
 
@@ -132,6 +134,26 @@ Column {
             }
             chevron: true
             onTapped: root.opened("devices")
+        }
+    }
+    SettingsSection {
+        width: parent.width
+        label: "INTEGRATIONS"
+        Repeater {
+            model: root.vault.services || []
+            SettingsRow {
+                required property var modelData
+                title: modelData.title
+                note: {
+                    const s = modelData
+                    if (!s.registered)
+                        return "Not set up · add the key from a PC's web console"
+                    const n = s.hosts.length
+                    return (s.linked ? "Linked" : "Key stored · not linked yet") + " · " + (n === 0 ? "no PC allowed" : n + (n === 1 ? " PC allowed" : " PCs allowed"))
+                }
+                chevron: true
+                onTapped: root.opened("vault:" + modelData.id)
+            }
         }
     }
     SettingsSection {

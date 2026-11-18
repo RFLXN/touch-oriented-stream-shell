@@ -1,5 +1,6 @@
 //! 웹 콘솔: 브라우저에서 호스트의 toss-connector를 관리하는 정적 웹 UI와 로컬 HTTP API.
-//! CLI(`toss-connector allow`, `command add` 등) 기능을 웹 UI로 제공한다(덱별 권한, 명령 관리, 페어링, 절전/깨우기).
+//! CLI(`toss-connector allow`, `command add` 등) 기능을 웹 UI로 제공한다(덱별 권한, 명령 관리, 페어링, 절전/깨우기, 외부 연동).
+//! `toss-connector discord` CLI도 이 API를 호출한다(덱 금고 요청은 실행 중인 데몬의 덱 세션을 거쳐야 하기 때문).
 //!
 //! 정적 파일(src/app/host/console/의 index.html, app.js, style.css; 빌드 과정 없음)로 구성된다.
 //!   - 기본: 실행 중인 toss-connector가 http://127.0.0.1:<포트>/ 에서 직접 서빙(`toss-connector console`로 열기).
@@ -33,6 +34,10 @@
 //!   GET    /api/commands/<id>/state        현재 상태 조회 → `{"value": 숫자 또는 null, "text": "..."}`
 //!   POST   /api/pair                       `{"addr": "172.16.42.1"}` 페어링 시작 (진행 상태는 state.pairing 참고)
 //!   POST   /api/pair/confirm               검증 숫자 일치 확인 / POST /api/pair/cancel 페어링 취소
+//!   POST   /api/vault/<서비스>/put         `{"client_id", "client_secret", "redirect_uri"}` 서비스 키를 덱 금고에 저장(이 PC에는 남기지 않음)
+//!   POST   /api/vault/<서비스>/forget      덱 금고에서 서비스 키와 토큰 삭제
+//!   POST   /api/discord/link | check       Discord 연결(승인) / 확인 시작 (진행 상태는 state.discord 참고) / POST /api/discord/clear 결과 지우기
+//!   (금고 요청은 덱이 화면에서 허용 여부를 묻는 동안 최대 1분쯤 응답이 늦어질 수 있다. 연결된 덱의 금고 상태는 state.vault)
 //!
 //! 설정은 console.json에 저장한다: `{"port": 7880, "origins": ["https://..."]}`.
 
@@ -213,7 +218,7 @@ pub fn spawn(dir: PathBuf, managed: Option<PathBuf>) {
 /// 연결 수락 루프 (요청별 스레드 생성)
 pub fn serve(listener: TcpListener, dir: PathBuf, managed: Option<PathBuf>) {
     let port = listener.local_addr().map(|a| a.port()).unwrap_or(CONSOLE_PORT);
-    let ctx = Arc::new(Ctx { dir, managed, port, pairing: Mutex::new(Progress::default()) });
+    let ctx = Arc::new(Ctx { dir, managed, port, pairing: Mutex::new(Progress::default()), discord: Mutex::new(Job::default()) });
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
         let ctx = ctx.clone();
@@ -229,6 +234,7 @@ struct Ctx {
     managed: Option<PathBuf>,
     port: u16,
     pairing: Mutex<Progress>,
+    discord: Mutex<Job>,
 }
 
 struct Request {
@@ -505,6 +511,29 @@ fn api(req: &Request, ctx: &Arc<Ctx>, cfg: &Config) -> ApiResult {
         ("POST", ["pair", "confirm"]) => pair_answer(ctx, true),
         ("POST", ["pair", "cancel"]) => pair_answer(ctx, false),
 
+        ("POST", ["vault", service, "put"]) => {
+            let b = body()?;
+            let text = |key: &str| b[key].as_str().map(str::trim).unwrap_or_default().to_string();
+            let fields = json!({ "client_id": text("client_id"), "client_secret": text("client_secret"), "redirect_uri": text("redirect_uri") });
+            crate::vault::ask(toss_proto::VAULT_PUT, service, fields).map_err(|e| (409, e))?;
+            done()
+        }
+        ("POST", ["vault", service, "forget"]) => {
+            crate::vault::ask(toss_proto::VAULT_FORGET, service, Value::Null).map_err(|e| (409, e))?;
+            done()
+        }
+        ("POST", ["discord", kind @ ("link" | "check")]) => {
+            discord_start(ctx, if *kind == "link" { "link" } else { "check" })?;
+            done()
+        }
+        ("POST", ["discord", "clear"]) => {
+            let mut job = ctx.discord.lock().unwrap();
+            if !job.busy() {
+                *job = Job::default();
+            }
+            done()
+        }
+
         _ => Err((404, "존재하지 않는 경로입니다".into())),
     }
 }
@@ -543,6 +572,8 @@ fn state(store: &Store, cmds: &Commands, ctx: &Ctx, cfg: &Config) -> Value {
         }).collect::<Vec<_>>(),
         "managed": managed.as_ref().map(|m| json!({ "strict": m.strict, "permissions": m.permissions, "commands": m.commands.len() })),
         "pairing": ctx.pairing.lock().unwrap().shown(),
+        "vault": crate::vault::state().map(|(deck, services)| json!({ "deck": deck, "services": services })),
+        "discord": ctx.discord.lock().unwrap().shown(),
         "origins": cfg.origins,
         "usb_addr": toss_proto::USB_DECK_ADDR,
     })
@@ -633,6 +664,176 @@ fn pair_start(ctx: &Arc<Ctx>, addr: String) -> Result<(), (u16, String)> {
         }
     });
     Ok(())
+}
+
+/// 웹 UI 표시용 Discord 작업 상태
+#[derive(Default)]
+struct Job {
+    /// link(연결·승인) 또는 check(확인)
+    kind: &'static str,
+    /// idle     대기 중
+    /// deck     덱의 응답 대기(이 PC가 처음이면 덱 화면에서 허용 여부를 묻는 중)
+    /// discord  Discord 앱 대기(link면 승인 창)
+    /// done     완료(who에 인증된 사용자) / failed 실패(error에 사유)
+    phase: &'static str,
+    who: Option<crate::discord::Who>,
+    error: String,
+}
+
+impl Job {
+    fn shown(&self) -> Value {
+        json!({
+            "kind": self.kind,
+            "phase": if self.phase.is_empty() { "idle" } else { self.phase },
+            "who": self.who.as_ref().map(|w| json!({ "name": w.name, "expires": w.expires, "scopes": w.scopes })),
+            "error": self.error,
+        })
+    }
+    fn busy(&self) -> bool {
+        matches!(self.phase, "deck" | "discord")
+    }
+}
+
+/// 백그라운드 스레드에서 Discord 연결(link) 또는 확인(check)을 진행하며 상태를 Job에 기록한다.
+fn discord_start(ctx: &Arc<Ctx>, kind: &'static str) -> Result<(), (u16, String)> {
+    let mut job = ctx.discord.lock().unwrap();
+    if job.busy() {
+        return Err((409, "Discord 작업이 이미 진행 중입니다".into()));
+    }
+    *job = Job { kind, phase: crate::discord::STEP_DECK, ..Job::default() };
+    drop(job);
+    let ctx = ctx.clone();
+    thread::spawn(move || {
+        let step = |phase: &'static str| ctx.discord.lock().unwrap().phase = phase;
+        let got = if kind == "link" { crate::discord::link(step) } else { crate::discord::check(step) };
+        let mut job = ctx.discord.lock().unwrap();
+        match got {
+            Ok(who) => {
+                eprintln!("Discord {}: {}", if kind == "link" { "연결됨" } else { "인증 확인" }, who.name);
+                job.phase = "done";
+                job.who = Some(who);
+            }
+            Err(why) => {
+                eprintln!("Discord {} 실패: {why}", if kind == "link" { "연결" } else { "확인" });
+                job.phase = "failed";
+                job.error = why;
+            }
+        }
+    });
+    Ok(())
+}
+
+/// 실행 중인 toss-connector의 로컬 API를 호출한다(CLI용). 실패하면 사용자에게 보여 줄 문장을 돌려준다.
+fn local_api(dir: &Path, method: &str, path: &str, body: Option<&Value>) -> Result<Value, String> {
+    let port = config(dir).port;
+    let tok = token(dir).map_err(|e| format!("웹 콘솔 토큰을 읽을 수 없습니다: {e}"))?;
+    let mut s = TcpStream::connect_timeout(&SocketAddr::from((Ipv4Addr::LOCALHOST, port)), Duration::from_millis(800))
+        .map_err(|_| format!("실행 중인 toss-connector에 연결할 수 없습니다 (127.0.0.1:{port}). `toss-connector` 데몬을 웹 콘솔과 함께 실행해 두세요"))?;
+    s.set_read_timeout(Some(toss_proto::VAULT_ASK_WAIT + Duration::from_secs(40))).map_err(|e| e.to_string())?;
+    let body = body.map(Value::to_string).unwrap_or_default();
+    let head = format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {tok}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+    s.write_all(head.as_bytes()).and_then(|()| s.write_all(body.as_bytes())).map_err(|e| e.to_string())?;
+    let mut raw = Vec::new();
+    s.read_to_end(&mut raw).map_err(|e| format!("응답을 읽을 수 없습니다: {e}"))?;
+    let text = String::from_utf8_lossy(&raw);
+    let (head, payload) = text.split_once("\r\n\r\n").ok_or("응답 형식이 올바르지 않습니다")?;
+    let status: u16 = head.split_whitespace().nth(1).and_then(|c| c.parse().ok()).unwrap_or(0);
+    let v: Value = serde_json::from_str(payload).unwrap_or(Value::Null);
+    if status == 200 {
+        Ok(v)
+    } else {
+        Err(v["error"].as_str().map_or_else(|| format!("요청 실패 (HTTP {status})"), str::to_string))
+    }
+}
+
+/// 화면에 보이지 않게 한 줄을 입력받는다(터미널이면 `stty -echo`로 입력 표시를 끈다)
+fn read_hidden(prompt: &str) -> String {
+    use std::io::IsTerminal;
+    print!("{prompt}");
+    let _ = io::stdout().flush();
+    let tty = io::stdin().is_terminal();
+    let stty = |arg: &str| std::process::Command::new("stty").arg(arg).stdin(std::process::Stdio::inherit()).status().is_ok_and(|s| s.success());
+    let hidden = tty && stty("-echo");
+    let mut line = String::new();
+    let _ = io::stdin().read_line(&mut line);
+    if hidden {
+        stty("echo");
+        println!();
+    }
+    line.trim().to_string()
+}
+
+fn read_line(prompt: &str) -> String {
+    print!("{prompt}");
+    let _ = io::stdout().flush();
+    let mut line = String::new();
+    let _ = io::stdin().read_line(&mut line);
+    line.trim().to_string()
+}
+
+/// `toss-connector discord ...`: 실행 중인 toss-connector의 로컬 API로 덱 금고와 Discord 연결을 다룬다.
+pub fn discord_cli(store: &Store, sub: Option<&str>) {
+    let dir = store.dir();
+    let call = |method: &str, path: &str, body: Option<&Value>| local_api(dir, method, path, body).unwrap_or_else(|e| crate::fail(&e));
+    match sub {
+        None | Some("status") => {
+            let st = call("GET", "/api/state", None);
+            let deck = st["decks"].as_array().and_then(|d| d.iter().find(|d| d["connected"] == true)).map(|d| d["name"].as_str().unwrap_or_default().to_string());
+            let Some(deck) = deck else { return println!("연결된 덱이 없습니다.") };
+            let Some(s) = st["vault"]["services"].as_array().and_then(|l| l.iter().find(|s| s["id"] == toss_proto::SERVICE_DISCORD)) else {
+                return println!("덱 {deck}이(가) 금고를 지원하지 않습니다 (덱 이미지를 새로 플래싱하세요).");
+            };
+            let yes = |k: &str| s[k] == true;
+            println!("덱: {deck}");
+            println!("  Discord 키      {}", if yes("registered") { "저장됨" } else { "없음 (toss-connector discord set)" });
+            println!("  연결(승인)      {}", if yes("linked") { "됨" } else { "안 됨 (toss-connector discord link)" });
+            println!("  이 PC의 사용    {}", if yes("allowed") { "허용됨" } else { "아직 허용 안 됨 (처음 쓸 때 덱 화면에서 묻습니다)" });
+        }
+        Some("set") => {
+            println!("Discord 개발자 포털(https://discord.com/developers/applications)의 앱 > OAuth2 화면에서 값을 확인하세요.");
+            let client_id = read_line("Client ID: ");
+            let client_secret = read_hidden("Client Secret (입력이 표시되지 않음): ");
+            let redirect = read_line("Redirect URI [http://localhost, 비우려면 -]: ");
+            let redirect = match redirect.as_str() {
+                "" => "http://localhost".to_string(),
+                "-" => String::new(),
+                _ => redirect,
+            };
+            println!("덱에 저장하는 중... (이 PC가 처음이면 덱 화면에서 ALLOW를 누르세요)");
+            call("POST", "/api/vault/discord/put", Some(&json!({ "client_id": client_id, "client_secret": client_secret, "redirect_uri": redirect })));
+            println!("덱에 저장했습니다. 이 PC에는 남기지 않았습니다. 이어서: toss-connector discord link");
+        }
+        Some(kind @ ("link" | "check")) => {
+            call("POST", &format!("/api/discord/{kind}"), None);
+            let mut said = "";
+            loop {
+                let job = call("GET", "/api/state", None)["discord"].clone();
+                let phase = job["phase"].as_str().unwrap_or("idle").to_string();
+                match phase.as_str() {
+                    "done" => {
+                        println!("Discord 인증 확인: {} (토큰 만료: {})", job["who"]["name"].as_str().unwrap_or_default(), job["who"]["expires"].as_str().unwrap_or("?"));
+                        return;
+                    }
+                    "failed" => crate::fail(job["error"].as_str().unwrap_or("실패했습니다")),
+                    "deck" if said != "deck" => {
+                        said = "deck";
+                        println!("덱의 응답을 기다리는 중... (이 PC가 처음이면 덱 화면에서 ALLOW를 누르세요)");
+                    }
+                    "discord" if said != "discord" => {
+                        said = "discord";
+                        println!("{}", if kind == "link" { "Discord 앱에 뜬 승인 창에서 승인하세요..." } else { "Discord 앱에 인증하는 중..." });
+                    }
+                    _ => {}
+                }
+                thread::sleep(Duration::from_millis(700));
+            }
+        }
+        Some("forget") => {
+            call("POST", "/api/vault/discord/forget", None);
+            println!("덱에서 Discord 키와 토큰을 삭제했습니다.");
+        }
+        Some(other) => crate::usage(&format!("알 수 없는 명령: discord {other}")),
+    }
 }
 
 fn pair_answer(ctx: &Ctx, same: bool) -> ApiResult {

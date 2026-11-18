@@ -56,6 +56,37 @@
       <div id="commands"></div>
     </section>
 
+    <section id="links-section" class="panel" hidden>
+      <h2>외부 연동</h2>
+      <p class="note lead">외부 서비스의 키는 덱에 암호화해 보관하고 이 PC에는 남기지 않습니다. 이 PC는 덱이 그 키로 발급한 짧은 수명의 토큰만 빌려 씁니다.
+        이 PC가 처음 덱 금고를 쓰면 덱 화면에서 허용 여부를 묻습니다(<b>ALLOW</b>).</p>
+      <div class="box" id="discord">
+        <div class="row">
+          <div class="text">
+            <div class="title">Discord <span id="discord-tags"></span></div>
+            <div class="note" id="discord-deck"></div>
+          </div>
+          <div class="keys">
+            <button id="discord-link" class="key accent">Discord 연결</button>
+            <button id="discord-check" class="key">토큰 확인</button>
+            <button id="discord-forget" class="key">키 삭제</button>
+          </div>
+        </div>
+        <div id="discord-progress" class="sub" hidden></div>
+        <form id="discord-form" class="sub">
+          <div class="triple">
+            <label class="field"><span>Client ID</span><input id="d-id" type="text" spellcheck="false" class="mono" inputmode="numeric" autocomplete="off"></label>
+            <label class="field"><span>Client Secret <i>— 덱으로 보내기만 합니다</i></span><input id="d-secret" type="password" spellcheck="false" class="mono" autocomplete="off"></label>
+            <label class="field"><span>Redirect URI</span><input id="d-redirect" type="text" spellcheck="false" class="mono" value="http://localhost"></label>
+          </div>
+          <div class="actions"><button type="submit" id="d-save" class="key">덱에 저장</button></div>
+          <p class="note">Discord 개발자 포털(<code>https://discord.com/developers/applications</code>)에서 앱을 만든 뒤 OAuth2 화면의 Client ID와 Client Secret을 입력하세요.
+            같은 화면의 Redirects에 위 Redirect URI를 등록하고, 앱의 테스터 목록에 본인 계정을 추가해야 합니다(음성 권한은 Discord가 승인한 앱이나 그 앱의 테스터에게만 열려 있습니다).
+            저장한 뒤 <b>Discord 연결</b>을 누르면 이 PC의 Discord 앱에 승인 창이 뜹니다.</p>
+        </form>
+      </div>
+    </section>
+
     <section id="about-section" class="panel" hidden>
       <h2>정보</h2>
       <div class="box"><div id="about" class="note"></div></div>

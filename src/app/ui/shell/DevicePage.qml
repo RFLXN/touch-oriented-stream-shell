@@ -12,7 +12,7 @@ Item {
     function fingerprint(id) { return id ? id.slice(0, 16).match(/.{1,4}/g).join(" ") : "" }
     function capText(cap) {
         return cap === "media.info" ? "Media info" : cap === "media.control" ? "Media control"
-             : cap === "resource.info" ? "Resources" : cap === "command.run" ? "Commands" : cap
+             : cap === "resource.info" ? "Resources" : cap === "command.run" ? "Commands" : cap === "web.open" ? "Web pages" : cap
     }
     function capsText(caps) { return caps && caps.length ? caps.map(capText).join(", ") : "Nothing" }
 

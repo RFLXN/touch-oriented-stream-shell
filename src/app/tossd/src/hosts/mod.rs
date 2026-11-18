@@ -14,6 +14,7 @@
 //!   pairing.rs  페어링 모드 관리, 후보 상태, 양측 확인 처리
 //!   blob.rs     청크 단위로 전송되는 앨범 아트 바이너리 조합
 //!   store.rs    페어링 목록과 덱 키 영구 저장
+//!   vault.rs    덱 금고: 외부 연동 키 보관, 토큰 발급·갱신과 대여, 금고를 쓸 수 있는 호스트 관리
 //!
 //! 미디어 상태는 호스트에서 이벤트(곡 변경, 재생/일시정지, 탐색 등)가 발생할 때만 전송된다. 수신 시각을 기록해 두고,
 //! UI에 전달할 때마다 경과 시간만큼 보정한 `position_ms`를 계산해 넘긴다(이후 실시간 카운트는 UI 측에서 처리).
@@ -29,6 +30,7 @@ mod blob;
 mod pairing;
 mod session;
 mod store;
+mod vault;
 
 use std::collections::{BTreeMap, HashMap};
 use std::net::{SocketAddr, TcpListener};
@@ -44,6 +46,8 @@ use toss_proto::{CommandInfo, DeckMsg, Media, MetricInfo, DENIED_FORGOTTEN};
 
 use blob::Blob;
 use pairing::Pending;
+use vault::Vault;
+pub use vault::VaultState;
 
 /// `accept()` 실패 시 재시도 대기 시간(FD 고갈 시 CPU 점유 방지)
 pub const ACCEPT_RETRY: Duration = Duration::from_millis(100);
@@ -132,6 +136,8 @@ pub trait Events: Send + Sync {
     fn result(&self, widget: u32, ok: bool, error: String);
     /// 호스트가 덱 절전을 요청함. 진입 불가 시 사유 코드(`toss-proto`의 `SLEEP_*`)를 반환한다.
     fn sleep(&self) -> Result<(), String>;
+    /// 금고 상태 변경(서비스 키 등록·연결 여부, 허용한 호스트, 허용 여부를 묻는 중인 요청)
+    fn vault(&self, state: VaultState);
 }
 
 struct Entry {
@@ -196,6 +202,8 @@ pub struct Hosts {
     /// 파일 저장 직렬화용 뮤텍스
     saving: Mutex<()>,
     events: Arc<dyn Events>,
+    /// 외부 연동 키 보관소(`vault.rs`)
+    vault: Vault,
 }
 
 impl Hosts {
@@ -283,11 +291,38 @@ impl Hosts {
             gone
         };
         self.save();
+        self.vault.forget_host(id);
         if let Some(conn) = gone.conn {
             let _ = conn.send(&DeckMsg::Denied { reason: DENIED_FORGOTTEN.to_string() });
             conn.shutdown();
         }
         eprintln!("host: 페어링 삭제: {}", gone.info.name);
+    }
+
+    /// 연결된 모든 호스트에 각자의 금고 상태를 보낸다(허용 여부가 호스트마다 다르다).
+    fn announce_vault(&self) {
+        let conns: Vec<(String, Arc<Conn>)> = self.inner.lock().unwrap().entries.iter().filter_map(|e| Some((e.info.id.clone(), e.conn.clone()?))).collect();
+        for (key, conn) in conns {
+            let _ = conn.send(&DeckMsg::VaultState { services: self.vault.status_for(&key) });
+        }
+    }
+
+    /// 화면에서 묻고 있는 금고 사용 요청에 답한다(`allow`가 true면 허용).
+    pub fn vault_answer(&self, allow: bool) {
+        self.vault.answer(allow);
+    }
+
+    /// 이 서비스에 대한 호스트의 금고 사용 허용을 해제한다.
+    pub fn vault_revoke(&self, service: &str, host: &str) {
+        self.vault.revoke(service, host);
+        self.announce_vault();
+    }
+
+    /// 이 서비스의 키와 토큰을 덱에서 삭제한다.
+    pub fn vault_forget(&self, service: &str) {
+        self.vault.forget(service);
+        eprintln!("vault: 화면에서 {service} 키를 삭제함");
+        self.announce_vault();
     }
 }
 
@@ -295,6 +330,8 @@ impl Hosts {
 /// `addr` 바인딩에 실패하면 주기적으로 재시도한다. `data_dir`은 덱 키와 페어링 목록을 저장하는 경로다(`store.rs`).
 pub fn spawn(addr: SocketAddr, data_dir: PathBuf, deck_name: String, events: Arc<dyn Events>) -> Arc<Hosts> {
     let store = data_dir.join("hosts.json");
+    let to_ui = events.clone();
+    let vault = Vault::open(&data_dir, move |state| to_ui.vault(state));
     let hosts = Arc::new(Hosts {
         inner: Mutex::new(Inner { entries: store::load(&store), watch: BTreeMap::new(), pairing_until: None, pending: None }),
         next_session: AtomicU64::new(1),
@@ -304,12 +341,14 @@ pub fn spawn(addr: SocketAddr, data_dir: PathBuf, deck_name: String, events: Arc
         store,
         saving: Mutex::new(()),
         events,
+        vault,
     });
     {
         let inner = hosts.inner.lock().unwrap();
         eprintln!("host: 덱 ID {}..., 페어링된 호스트 {}개", &hosts.identity.id()[..12], inner.entries.len());
         hosts.publish(&inner);
     }
+    hosts.events.vault(hosts.vault.state());
 
     let me = hosts.clone();
     thread::spawn(move || {

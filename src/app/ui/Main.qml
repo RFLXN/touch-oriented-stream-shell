@@ -176,6 +176,11 @@ Window {
             anchors.fill: parent
         }
 
+        VaultAsk {
+            anchors.fill: parent
+            link: daemon
+        }
+
         LinkInfo {
             id: info
             anchors { top: bar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }

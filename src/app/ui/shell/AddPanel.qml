@@ -53,7 +53,7 @@ DropPanel {
         }
         const first = {}
         for (const s of kind.settings)
-            first[s.key] = s.type === "color" ? "bone" : s.type === "metrics" ? [] : s.type === "host" && s.own ? "@deck" : ""
+            first[s.key] = s.type === "color" ? "bone" : s.type === "url" ? "https://" : s.type === "metrics" ? [] : s.type === "host" && s.own ? "@deck" : ""
         chosen = first
         page = "options"
     }
@@ -89,6 +89,8 @@ DropPanel {
         for (const s of kind.settings) {
             const v = chosen[s.key]
             if (s.required && (Array.isArray(v) ? v.length === 0 : !v))
+                return false
+            if (s.type === "url" && v && !/^https?:\/\/[^\/\s]\S*$/.test(v))
                 return false
         }
         return true

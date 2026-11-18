@@ -13,6 +13,8 @@
 // NixOS 모듈(programs.toss-connector.config)로 관리되는 설정이 있으면 state.managed에 포함된다.
 // 여기서 고정된 권한(perms.fixed)과 명령(commands.managed)은 UI에서 수정할 수 없도록 잠그고 "Nix" 태그를 표시한다(API에서도 거부됨).
 // 사용자 입력(명령 이름, 커맨드 등)을 DOM에 삽입할 때는 XSS 방지를 위해 textContent만 사용한다.
+// 외부 연동(Discord) 키 입력 칸은 HTML에 고정해 두어 1.5초마다 다시 그려도 입력 중인 값이 사라지지 않는다.
+// Client Secret은 덱으로 보내기만 하고 저장에 성공하면 칸을 비운다(브라우저 저장소에도 남기지 않는다).
 "use strict";
 
 const $ = (id) => document.getElementById(id);
@@ -99,7 +101,7 @@ function showConnect(why) {
   $("connect").hidden = false;
   $("connect-why").textContent = why;
   $("origin-hint").textContent = api === location.origin ? "" : " 이 페이지는 toss-connector가 직접 제공한 페이지가 아닙니다. PC에서 출처를 먼저 허용하세요: toss-connector console allow " + location.origin;
-  for (const id of ["decks-section", "commands-section", "about-section"]) $(id).hidden = true;
+  for (const id of ["decks-section", "commands-section", "links-section", "about-section"]) $(id).hidden = true;
   $("link").firstElementChild.className = "lamp bad";
   $("link-text").textContent = "연결 안 됨";
 }
@@ -135,7 +137,7 @@ async function refresh() {
     $("connect").hidden = true;
     $("token").value = "";
   }
-  for (const id of ["decks-section", "commands-section", "about-section"]) $(id).hidden = false;
+  for (const id of ["decks-section", "commands-section", "links-section", "about-section"]) $(id).hidden = false;
   draw();
 }
 
@@ -155,6 +157,7 @@ function draw() {
   once("decks", [state.decks, state.permissions], drawDecks);
   once("pairing", state.pairing, drawPairing);
   once("commands", [state.commands, state.managed], drawCommands);
+  once("links", [state.vault, state.discord, state.decks.map((d) => [d.key, d.name])], drawLinks);
   once("about", [state.origins, state.host, state.managed, api], drawAbout);
 }
 
@@ -369,6 +372,50 @@ $("editor-form").onsubmit = async (e) => {
     $("editor-error").textContent = err.message;
     $("editor-error").hidden = false;
   }
+};
+
+const discordSteps = {
+  deck: "덱의 응답을 기다리는 중... 이 PC가 처음이면 덱 화면에서 ALLOW를 누르세요.",
+  link: "이 PC의 Discord 앱에 뜬 승인 창에서 승인하세요...",
+  check: "Discord 앱에 인증하는 중...",
+};
+
+function drawLinks() {
+  const v = state.vault, job = state.discord;
+  const s = v && v.services.find((x) => x.id === "discord");
+  const busy = job.phase === "deck" || job.phase === "discord";
+  const tag = (text, on) => h("span", { class: "tag" + (on ? " on" : "") }, text);
+  $("discord-tags").replaceChildren(...(s ? [tag(s.registered ? "키 저장됨" : "키 없음", s.registered), tag(s.linked ? "연결됨" : "연결 안 됨", s.linked),
+    tag(s.allowed ? "이 PC 허용됨" : "이 PC 허용 전", s.allowed)] : []));
+  const deck = v && state.decks.find((d) => d.key === v.deck);
+  $("discord-deck").textContent = !v ? "연결된 덱이 없거나 덱이 금고를 지원하지 않습니다."
+    : "키와 토큰은 덱 " + (deck ? deck.name : v.deck.slice(0, 12)) + "에 보관됩니다.";
+  $("discord-link").disabled = !s || !s.registered || busy;
+  $("discord-check").disabled = !s || !s.linked || busy;
+  $("discord-forget").disabled = !s || !s.registered || busy;
+  $("d-save").disabled = !v || busy;
+  const p = $("discord-progress");
+  p.hidden = job.phase === "idle";
+  p.replaceChildren();
+  if (job.phase === "idle") return;
+  const text = job.phase === "deck" ? discordSteps.deck : job.phase === "discord" ? discordSteps[job.kind]
+    : job.phase === "done" ? "인증됨: " + job.who.name + (job.who.expires ? " · 토큰 만료 " + job.who.expires : "") : job.error;
+  p.append(h("p", { class: job.phase === "failed" ? "error" : "note" }, text));
+  if (!busy) p.append(h("div", { class: "keys" }, h("button", { class: "key small", onclick: () => act("POST", "/api/discord/clear") }, "닫기")));
+}
+
+$("discord-form").onsubmit = async (e) => {
+  e.preventDefault();
+  toast("덱에 저장하는 중... 이 PC가 처음이면 덱 화면에서 ALLOW를 누르세요.");
+  const saved = await act("POST", "/api/vault/discord/put",
+    { client_id: $("d-id").value, client_secret: $("d-secret").value, redirect_uri: $("d-redirect").value }, "덱에 저장했습니다. 이 PC에는 남기지 않았습니다.");
+  if (saved) $("d-secret").value = "";
+};
+$("discord-link").onclick = () => act("POST", "/api/discord/link");
+$("discord-check").onclick = () => act("POST", "/api/discord/check");
+$("discord-forget").onclick = async () => {
+  if (await ask("Discord 키 삭제", "덱에 보관한 Discord 앱 키와 토큰을 삭제합니다. 다시 쓰려면 키를 저장하고 다시 연결해야 합니다.", "삭제"))
+    act("POST", "/api/vault/discord/forget", null, "삭제되었습니다");
 };
 
 function drawAbout() {

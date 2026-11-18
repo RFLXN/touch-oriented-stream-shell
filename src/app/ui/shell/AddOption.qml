@@ -5,6 +5,7 @@
 //   metrics  위에서 선택한 호스트(덱 또는 PC)의 측정 가능 메트릭 중 복수 선택(`max`개까지). 탭한 순서대로 추가되며 다시 탭하면 해제된다.
 //   command  위에서 선택한 PC에 등록된 명령 중 하나 선택(해당 호스트 목록 기준). `filter`가 있으면 해당 타입의 명령만 표시.
 //   text     텍스트 입력 필드
+//   url      웹페이지 주소 입력 필드(자동 완성 없이 입력. `https://`로 시작한 채 열린다)
 //   color    버튼 색상 선택
 // 현재 선택 상태는 상위 `panel.chosen`에 보관되며, 여기서는 표시 및 선택 이벤트(`panel.chooseFor`, `panel.toggleMetric`, `panel.choose`)를 전달한다.
 // `leave()`는 텍스트 입력 필드의 포커스와 조합 중인 문자를 정리한다(패널 닫힘 또는 ADD 클릭 시 호출).
@@ -106,14 +107,15 @@ SettingsSection {
             : "On that PC: " + option.modelData.about + " …, then toss-connector allow command.run"
     }
     Item {
-        visible: option.modelData.type === "text"
+        visible: option.modelData.type === "text" || option.modelData.type === "url"
         width: parent.width
         height: 84
         TextField {
             id: field
             anchors { left: parent.left; right: parent.right; margins: 16; verticalCenter: parent.verticalCenter }
             placeholder: option.modelData.about
-            maximumLength: Theme.labelMax
+            maximumLength: option.modelData.type === "url" ? 512 : Theme.labelMax
+            plain: option.modelData.type === "url"
             text: option.chosen[option.modelData.key] || ""
             onTextChanged: {
                 if (visible && option.panel && text !== (option.chosen[option.modelData.key] || ""))

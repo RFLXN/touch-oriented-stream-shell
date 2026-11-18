@@ -1,5 +1,5 @@
 //! 영구 데이터 저장: 영구 파티션(`data_dir`)의 파일이 손상되지 않게 원자적으로 쓰고, 읽을 수 없는 파일은 따로 백업해 둔다.
-//! 배치(`layout.json`), 페어링 목록(`hosts.json`), 덱 설정(`settings.json`), 덱 키(`key`)가 이 모듈을 사용한다.
+//! 배치(`layout.json`), 페어링 목록(`hosts.json`), 덱 설정(`settings.json`), 덱 키(`key`), 금고(`vault.json`, `vault.key`)가 이 모듈을 사용한다.
 //!
 //! 덱은 전원을 바로 차단할 수 있는 기기이므로, 임시 파일(`.new`)에 먼저 쓰고 `fsync`한 뒤 이름을 바꾼다.
 //! 쓰기 도중 전원이 꺼져도 이전 내용이나 새 내용 중 하나는 온전히 남도록 하기 위함이다.
@@ -35,6 +35,22 @@ pub fn sync(path: &Path) {
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let tmp = with_suffix(path, "new");
     let mut f = File::create(&tmp)?;
+    f.write_all(bytes)?;
+    f.sync_all()?;
+    drop(f);
+    fs::rename(&tmp, path)?;
+    if let Some(dir) = path.parent().and_then(|d| File::open(d).ok()) {
+        let _ = dir.sync_all();
+    }
+    Ok(())
+}
+
+/// `write_atomic`과 같되 파일을 소유자만 읽고 쓸 수 있게(0600) 만든다. 금고(`vault.json`, `vault.key`)처럼 비밀 값이 든 파일에 쓴다.
+pub fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let tmp = with_suffix(path, "new");
+    let _ = fs::remove_file(&tmp);
+    let mut f = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
     f.write_all(bytes)?;
     f.sync_all()?;
     drop(f);
