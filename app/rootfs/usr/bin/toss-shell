@@ -1,0 +1,9 @@
+#!/bin/sh
+# 스트림덱 UI 클라이언트 실행 래퍼. 키오스크(`tf-kiosk`)가 컴포지터 내부에서 실행하며, `buildImage`의 `kiosk.command`로 지정된다.
+# UI는 `/usr/share/toss/ui`의 QML 파일로 구성되어 있으며 별도 네이티브 바이너리 없이 Qt QML 런타임으로 실행한다.
+# (`qmlscene`은 향후 제거 예정이라는 경고를 출력하지만, Alpine 런타임 패키지에는 이 바이너리만 포함되어 있다.)
+export QT_QPA_PLATFORM=wayland
+export QT_IM_MODULE=qtvirtualkeyboard
+export QML_IMPORT_PATH=/usr/share/toss/ui
+export QT_VIRTUALKEYBOARD_STYLE=toss
+exec /usr/lib/qt6/bin/qmlscene /usr/share/toss/ui/Main.qml

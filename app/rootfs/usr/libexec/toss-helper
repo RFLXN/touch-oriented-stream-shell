@@ -1,0 +1,52 @@
+#!/bin/sh
+# 덱 설정 UI에서 요청하는 작업 중 root 권한이 필요한 명령(전원 종료, 절전, SSH 제어)을 대신 실행하는 도우미.
+# root 권한의 `toss-helper` 서비스로 실행된다.
+#
+# 스트림덱 데몬(`tossd`)은 비권한 사용자로 동작하므로 이 작업들을 직접 수행할 수 없다.
+# 이 스크립트가 FIFO(`/run/toss-helper`)를 열어 두고 대기하다가 명령이 한 줄씩 들어오면 순서대로 실행한다.
+# FIFO는 `root`와 `tossd` 그룹만 쓸 수 있으며, 아래 명령 외에는 모두 무시한다.
+#   poweroff   전원 종료
+#   sleep      얕은 절전(`s2idle`) 진입. 진입 전 Wi-Fi 매직 패킷(WoWLAN)을 활성화한다(유일한 웨이크업 경로).
+#              깊은 절전(`deep`)은 이 기기에서 복귀하지 못하므로 사용하지 않는다(`docs/01-findings.md`).
+#   ssh on     SSH 서버(`dropbear`) 시작
+#   ssh off    SSH 서버 중지 및 기존 세션 강제 종료(이후 22번 포트 수신 중단).
+#              활성화 상태는 데몬이 `/data/toss/settings.json`에 기록하며(`"ssh": false`면 비활성),
+#              부팅 시 실행 여부도 이를 따른다(`/etc/conf.d/dropbear`의 `start_pre` — `nix/build-rootfs.sh`).
+#
+# 읽기-쓰기 FD(`3<>`)를 유지한 채 순차 처리하므로 이전 작업 수행 중 들어온 요청도 유실되지 않고 대기 후 처리된다
+# (그래서 데몬은 연속 절전 요청을 `SLEEP_GAP`으로 제한한다 — `app/tossd/src/device.rs`).
+# FIFO 생성에 실패하면(동일 이름의 일반 파일 존재 등) 무한 루프에 빠지지 않도록 종료해 서비스 관리자가 재시작하게 둔다.
+fifo=/run/toss-helper
+if [ ! -p "$fifo" ] && ! mkfifo "$fifo"; then
+	logger -t toss-helper "$fifo 생성 실패"
+	exit 1
+fi
+chown root:tossd "$fifo" && chmod 620 "$fifo" || exit 1
+exec 3<>"$fifo" || exit 1
+while read -r cmd <&3; do
+	case $cmd in
+	poweroff)
+		logger -t toss-helper "전원 종료(UI 요청)"
+		poweroff
+		;;
+	sleep)
+		logger -t toss-helper "절전 진입"
+		for phy in /sys/class/ieee80211/*; do
+			[ -e "$phy" ] && iw phy "${phy##*/}" wowlan enable magic-packet >/dev/null 2>&1
+		done
+		sleep 1
+		echo freeze >/sys/power/state
+		logger -t toss-helper "절전 복귀"
+		;;
+	"ssh on")
+		logger -t toss-helper "SSH 활성화"
+		rc-service dropbear start >/dev/null 2>&1
+		;;
+	"ssh off")
+		logger -t toss-helper "SSH 비활성화"
+		rc-service dropbear stop >/dev/null 2>&1
+		killall dropbear >/dev/null 2>&1
+		;;
+	esac
+done
+exit 1

@@ -1,0 +1,23 @@
+#!/sbin/openrc-run
+# 스트림덱 데몬. UI 클라이언트(`toss-shell`)가 `127.0.0.1:7878`로 접속한다.
+# 비정상 종료 시 `supervise-daemon`이 자동 재시작하며, 권한 없는 전용 계정 `tossd`로 실행된다.
+# 영구 데이터 디렉터리(`/data/toss`)는 `tf-data` 서비스가 마운트·생성하므로 그 이후에 시작한다.
+description="TOSS daemon"
+supervisor=supervise-daemon
+command=/usr/bin/tossd
+command_user="tossd:tossd"
+output_log=/var/log/tossd.log
+error_log=/var/log/tossd.log
+
+depend() {
+	need localmount
+	after bootmisc tf-data
+}
+
+start_pre() {
+	checkpath -f -o tossd:tossd -m 0644 /var/log/tossd.log
+	for b in /sys/class/backlight/*/brightness; do
+		[ -e "$b" ] && chgrp tossd "$b" && chmod 664 "$b"
+	done
+	return 0
+}

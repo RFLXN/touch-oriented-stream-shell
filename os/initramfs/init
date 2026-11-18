@@ -1,0 +1,93 @@
+#!/bin/busybox sh
+# 토스 프론트 initramfs 엔트리포인트.
+# 역할: (1) Micro USB 가젯(가상 시리얼 + USB 이더넷) 활성화 (2) `userdata` 파티션의 Alpine으로 전환.
+# 루트는 GPT 파티션명이 `userdata`인 파티션 중 첫 번째를 사용한다(노드 생성까지 최대 10초 대기, `/etc/init.d/tf-data`의 cache 탐색 방식과 동일).
+# 루트 마운트에 실패하거나 커널 cmdline에 `tf.rescue`가 있으면 USB 시리얼에 복구 셸을 띄운다.
+# initramfs 단계에서 가젯을 먼저 올리는 이유: 루트 파일시스템이 손상되어도 Micro USB만으로 접속해 복구할 수 있도록 하기 위함이다.
+
+/bin/busybox mkdir -p /proc /sys /dev /newroot
+/bin/busybox --install -s /bin
+export PATH=/bin
+
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs dev /dev
+
+log() { echo "tf-initramfs: $*" >/dev/kmsg; }
+
+setup_gadget() {
+  mount -t configfs none /sys/kernel/config || return 1
+  g=/sys/kernel/config/usb_gadget/tf
+  mkdir -p "$g" || return 1
+  echo 0x1d6b >"$g/idVendor"
+  echo 0x0104 >"$g/idProduct"
+  echo 0x0200 >"$g/bcdUSB"
+  mkdir -p "$g/strings/0x409"
+  echo "Toss Front" >"$g/strings/0x409/manufacturer"
+  echo "Toss Front Alpine" >"$g/strings/0x409/product"
+  echo "tossfront0001" >"$g/strings/0x409/serialnumber"
+  mkdir -p "$g/configs/c.1/strings/0x409"
+  echo "rndis+acm" >"$g/configs/c.1/strings/0x409/configuration"
+
+  mkdir -p "$g/functions/rndis.usb0" "$g/functions/acm.usb0"
+  echo "02:54:46:00:00:01" >"$g/functions/rndis.usb0/dev_addr"
+  echo "02:54:46:00:00:02" >"$g/functions/rndis.usb0/host_addr"
+  ln -s "$g/functions/rndis.usb0" "$g/configs/c.1/"
+  ln -s "$g/functions/acm.usb0" "$g/configs/c.1/"
+
+  udc=$(ls /sys/class/udc 2>/dev/null | head -n 1)
+  [ -n "$udc" ] || return 1
+  echo "$udc" >"$g/UDC"
+}
+
+rescue() {
+  log "rescue shell on ttyGS0: $*"
+  while :; do
+    if [ -c /dev/ttyGS0 ]; then
+      setsid sh -c 'exec sh </dev/ttyGS0 >/dev/ttyGS0 2>&1'
+    fi
+    sleep 1
+  done
+}
+
+if setup_gadget; then log "usb gadget up"; else log "usb gadget FAILED"; fi
+
+grep -qw tf.rescue /proc/cmdline && rescue "requested by cmdline"
+
+root=
+i=0
+while [ $i -lt 20 ] && [ -z "$root" ]; do
+  for u in /sys/class/block/*/uevent; do
+    if grep -q '^PARTNAME=userdata$' "$u" 2>/dev/null; then
+      root=/dev/$(basename "$(dirname "$u")")
+      break
+    fi
+  done
+  [ -n "$root" ] || sleep 0.5
+  i=$((i + 1))
+done
+[ -n "$root" ] || rescue "userdata partition not found"
+
+log "mounting $root"
+mount -t ext4 -o rw,noatime "$root" /newroot || rescue "mount $root failed"
+[ -x /newroot/sbin/init ] || rescue "no /sbin/init on $root"
+
+set_eth_mac() {
+  f=/newroot/etc/tossfront/eth0.mac
+  [ -e /sys/class/net/eth0 ] || return 0
+  if [ ! -s "$f" ]; then
+    cid=$(cat /sys/block/mmcblk*/device/cid 2>/dev/null | head -n 1)
+    [ -n "$cid" ] || return 0
+    h=$(echo "tossfront-eth0-$cid" | md5sum | cut -c1-10)
+    mkdir -p /newroot/etc/tossfront
+    echo "02:$(echo "$h" | sed 's/\(..\)/\1:/g; s/:$//')" >"$f"
+  fi
+  ip link set dev eth0 address "$(cat "$f")" 2>/dev/null || log "eth0 mac set failed"
+}
+set_eth_mac
+
+mount -o move /proc /newroot/proc
+mount -o move /sys /newroot/sys
+mount -o move /dev /newroot/dev
+log "switch_root"
+exec switch_root /newroot /sbin/init

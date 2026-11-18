@@ -1,0 +1,12 @@
+{
+ "firmware": {
+  "brcm/brcmfmac43455-sdio.bin": "4356f396229ccb36a84a525fb72e620b3cbf93521fd262756fa2f008bfb6b5d6",
+  "brcm/brcmfmac43455-sdio.txt": "aa1899199750dcb41f9ab4f4244951aa5cce95099846d4369a5f0b9b43cabf22",
+  "brcm/brcmfmac43455-sdio.clm_blob": "e5aaa200800424b8de496dd0c45eb6bf0542ef5f7f70636523035f25ce6685f2",
+  "brcm/BCM4345C0.hcd": "d657de90cbc6e39589688881bbbc39599c4c1d0dac064cbfb1390fa0da6f3fb7"
+ },
+ "boot": {
+  "name": "toss-front-761-boot.img",
+  "sha256": "353413f708f2e2655efc1f84d59c22bc42fbd9dc9558af05579222d2d890f56c"
+ }
+}

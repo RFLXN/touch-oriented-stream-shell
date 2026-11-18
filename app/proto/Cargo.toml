@@ -1,0 +1,11 @@
+[package]
+name = "toss-proto"
+version = "0.1.0"
+edition = "2021"
+description = "덱(tossd)과 호스트(PC의 toss-connector) 간 통신 프로토콜: 메시지 정의와 TCP 암호화 프레이밍"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+snow = { version = "0.10", default-features = false, features = ["default-resolver", "use-curve25519", "use-chacha20poly1305", "use-blake2", "use-getrandom"] }

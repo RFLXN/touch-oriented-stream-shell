@@ -1,0 +1,21 @@
+[package]
+name = "tossd"
+version = "0.1.0"
+edition = "2021"
+description = "토스 프론트 스트림덱 데몬. QML UI 클라이언트와 WebSocket으로 통신한다."
+publish = false
+
+[dependencies]
+toss-proto = { path = "../proto" }
+toss-meter = { path = "../meter" }
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

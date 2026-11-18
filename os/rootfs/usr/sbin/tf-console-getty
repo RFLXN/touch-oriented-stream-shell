@@ -1,0 +1,12 @@
+#!/bin/sh
+# 디스플레이 콘솔(`tty1`)에 로그인 프롬프트를 띄운다. `/etc/inittab`에서 respawn으로 실행한다.
+#
+# 화면의 부팅 로그를 지우고 `/etc/issue`의 환영 문구와 로그인 프롬프트만 표시한다.
+# 순정 4.19 커널(`recovery` 슬롯)에는 프레임버퍼 콘솔이 없다. `/dev/tty1` 노드는 존재해도 열리지 않으므로,
+# 파일 존재 여부가 아니라 실제로 열 수 있는지 확인한다. 열 수 없는 상태에서 `getty`를 실행하면
+# 실패와 재실행이 무한 반복되므로 조용히 대기한다.
+if { : >/dev/tty1; } 2>/dev/null; then
+  printf '\033[2J\033[H' >/dev/tty1
+  exec /sbin/getty 38400 tty1
+fi
+exec sleep 86400

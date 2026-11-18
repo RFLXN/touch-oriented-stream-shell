@@ -1,0 +1,6 @@
+#!/bin/sh
+# USB 이더넷(`usb0`)을 통해 PC에 DHCP 주소를 할당한다. PC 측에서 별도 설정 없이 바로 연결되도록 하기 위함이다.
+# 게이트웨이와 DNS는 배포하지 않는다 — PC의 기본 네트워크 경로를 변경하지 않기 위해서다.
+# `udhcpd`는 Alpine 기본 busybox가 아니라 `busybox-extras` 패키지에 포함되어 있다.
+ip link show usb0 >/dev/null 2>&1 || exit 0
+busybox-extras udhcpd -S /etc/udhcpd-usb0.conf

@@ -1,0 +1,8 @@
+#!/bin/sh
+# 재생 종료 후 스피커 앰프가 꺼질 때까지의 대기 시간을 5초에서 0.5초로 단축한다.
+# 이 기기의 앰프는 활성 상태 동안 무음 입력에서도 화이트 노이즈("쉬익" 소리)가 발생한다.
+# 믹서 설정(음량, 채널 극성)은 `alsa` 서비스가 `/var/lib/alsa/asound.state`에서 복원한다.
+for f in /sys/devices/platform/sound/*/pmdown_time; do
+  [ -e "$f" ] && echo 500 >"$f"
+done
+exit 0

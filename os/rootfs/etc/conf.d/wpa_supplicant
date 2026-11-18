@@ -1,0 +1,6 @@
+# `wpa_supplicant` 서비스 설정.
+# 저장된 AP와 비밀번호가 담기는 설정 파일은 영구 파티션(`/data`)에 둔다.
+# 파일 초기화 및 서비스 시작은 `/etc/local.d/30-wifi.start`에서 처리한다.
+wpa_supplicant_args=""
+wpa_supplicant_conf=/data/wifi/wpa_supplicant.conf
+umask=077

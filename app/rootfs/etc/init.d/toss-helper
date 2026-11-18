@@ -1,0 +1,11 @@
+#!/sbin/openrc-run
+# 전원 종료, 절전 진입, SSH 제어 도우미(`/usr/libexec/toss-helper`). root 권한으로 실행되며 데몬 요청을 대기한다.
+# 비권한 사용자로 실행되는 `tossd`가 직접 처리할 수 없는 root 작업을 위임받는다.
+description="TOSS root helper (power, sleep, SSH)"
+supervisor=supervise-daemon
+command=/usr/libexec/toss-helper
+
+depend() {
+	need localmount
+	before tossd
+}

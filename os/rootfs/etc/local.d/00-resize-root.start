@@ -1,0 +1,5 @@
+#!/bin/sh
+# 첫 부팅 시 루트 파일시스템을 파티션 전체 크기로 확장한다. 플래싱 시간 단축을 위해 초기 이미지는 작게 생성한다.
+[ -f /etc/.root-resized ] && exit 0
+dev=$(awk '$2 == "/" && $1 ~ /^\/dev\// {print $1}' /proc/mounts | tail -n 1)
+[ -n "$dev" ] && resize2fs "$dev" && touch /etc/.root-resized
