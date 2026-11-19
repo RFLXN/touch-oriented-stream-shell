@@ -2,7 +2,7 @@
 // (`shell/DropPanel` 기반: 제목 줄, 뒤로가기 버튼, 콘텐츠 영역, 열림/닫힘 애니메이션 제공 및 배경 터치 차단).
 //
 // 하위 화면(`page`)으로 구성된다. 제목 왼쪽 뒤로가기 버튼으로 이전 화면으로 돌아가며, 패널을 닫으면 첫 화면으로 초기화된다.
-//   main    설정 목록(`SettingsMain`)
+//   main    설정 목록(`SettingsMain`). 화면보다 길면 세로로 스크롤되며, 패널을 닫으면 맨 위로 돌아간다
 //   wifi    Wi-Fi 상태 및 스캔된 AP 목록(`WifiPage`)
 //   join    선택한 AP 연결 및 저장된 정보 삭제(`WifiJoin`). 화면을 벗어날 때 비밀번호 입력 칸을 비운다.
 //   devices 페어링된 호스트(PC) 목록(`DevicesPage`)   <- `main`의 DEVICES / Paired devices
@@ -58,7 +58,12 @@ DropPanel {
         if (page === "pair")
             show("devices")
     }
-    onShownChanged: if (shown === 0) page = "main"
+    onShownChanged: {
+        if (shown !== 0)
+            return
+        page = "main"
+        mainScroll.contentY = 0
+    }
 
     edge: true
     title: page === "wifi" ? "WI-FI"
@@ -72,13 +77,22 @@ DropPanel {
     canGoBack: page !== "main"
     onBackTapped: back()
 
-    SettingsMain {
+    Flickable {
+        id: mainScroll
         visible: root.page === "main"
-        width: parent.width
-        link: root.link
-        onOpened: (page) => root.show(page)
-        onEditLayout: root.editLayout()
-        onConfirmAsked: (title, text, yes, then, color) => root.confirmAsked(title, text, yes, then, color)
+        anchors.fill: parent
+        clip: true
+        contentHeight: settingsMain.height + 8
+        boundsBehavior: Flickable.StopAtBounds
+
+        SettingsMain {
+            id: settingsMain
+            width: mainScroll.width
+            link: root.link
+            onOpened: (page) => root.show(page)
+            onEditLayout: root.editLayout()
+            onConfirmAsked: (title, text, yes, then, color) => root.confirmAsked(title, text, yes, then, color)
+        }
     }
 
     DevicesPage {
