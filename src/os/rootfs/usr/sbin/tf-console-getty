@@ -5,7 +5,12 @@
 # 순정 4.19 커널(`recovery` 슬롯)에는 프레임버퍼 콘솔이 없다. `/dev/tty1` 노드는 존재해도 열리지 않으므로,
 # 파일 존재 여부가 아니라 실제로 열 수 있는지 확인한다. 열 수 없는 상태에서 `getty`를 실행하면
 # 실패와 재실행이 무한 반복되므로 조용히 대기한다.
+# 부팅 스플래시(initramfs)가 프레임버퍼 콘솔을 떼어 두었다면 애니메이션을 멈추고 콘솔을 다시 붙여 로그인 프롬프트가 보이게 한다.
 if { : >/dev/tty1; } 2>/dev/null; then
+  killall -q splash-play
+  for v in /sys/class/vtconsole/vtcon*; do
+    grep -q "frame buffer" "$v/name" 2>/dev/null && echo 1 >"$v/bind"
+  done
   printf '\033[2J\033[H' >/dev/tty1
   exec /sbin/getty 38400 tty1
 fi

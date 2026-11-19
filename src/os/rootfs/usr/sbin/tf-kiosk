@@ -9,6 +9,7 @@
 #   seat 그룹:  디스플레이 및 입력 장치를 `seatd`가 대신 열어 준다.
 #   video 그룹: 컴포지터가 GPU 렌더링 초기화 시 `/dev/dri/card*`를 직접 연다.
 # 로그는 `/var/log/kiosk.log`(직전 실행 로그는 `kiosk.log.1`)에 남긴다.
+# cage를 띄우기 전에 부팅 스플래시 애니메이션(`splash-play`, initramfs가 띄움)을 종료시킨다.
 # 화면 캡처: `su -s /bin/sh kiosk -c 'XDG_RUNTIME_DIR=/run/user/$(id -u) WAYLAND_DISPLAY=wayland-0 grim /tmp/shot.png'`
 
 sleep 1
@@ -29,6 +30,7 @@ chmod 700 "$run"
 log=/var/log/kiosk.log
 [ -f "$log" ] && mv "$log" "$log.1"
 
+killall -q splash-play
 printf '\033[2J\033[H\033[?25l' >/dev/tty1
 
 cd "$home" || exit 1

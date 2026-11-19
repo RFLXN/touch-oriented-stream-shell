@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 저장소 상태를 기기에 그대로 배포한다: 이미지 빌드 -> Loader 진입 -> 기록 및 되읽기 검증 -> 재부팅.
-# 기기가 어떤 상태였든 완료 후에는 "git이 추적하는 작업 트리의 파일(커밋하지 않은 수정 포함) + local/device/rootfs/" 상태로 초기화된다.
+# 기기가 어떤 상태였든 완료 후에는 "git이 추적하는 작업 트리의 파일(커밋하지 않은 수정 포함) + local/device/rootfs/ + local/splash/" 상태로 초기화된다.
 #
 # 사용법: nix develop -c src/scripts/deploy.sh [-y] [boot] [recovery] [userdata]
 #         대상을 생략하면 세 파티션을 모두 기록한다. `-y`는 확인 프롬프트를 건너뛴다.
@@ -27,7 +27,7 @@ done
 
 image_of() {
   case $1 in
-    boot) echo "$top/dist/images/boot-mainline.img" ;;
+    boot) echo "$top/dist/boot.img" ;;
     recovery) echo "$top/dist/images/boot-stage1.img" ;;
     userdata) echo "$top/dist/userdata.img" ;;
   esac

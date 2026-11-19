@@ -4,6 +4,12 @@
 # 루트는 GPT 파티션명이 `userdata`인 파티션 중 첫 번째를 사용한다(노드 생성까지 최대 10초 대기, `/etc/init.d/tf-data`의 cache 탐색 방식과 동일).
 # 루트 마운트에 실패하거나 커널 cmdline에 `tf.rescue`가 있으면 USB 시리얼에 복구 셸을 띄운다.
 # initramfs 단계에서 가젯을 먼저 올리는 이유: 루트 파일시스템이 손상되어도 Micro USB만으로 접속해 복구할 수 있도록 하기 위함이다.
+#
+# 부팅 스플래시: 커널 cmdline에 `tf.splash`가 있고 `/splash.ppm`이 있으면 가장 먼저 프레임버퍼(`/dev/fb0`, 최대 3초 대기)에 그린다.
+# 그리기 전에 프레임버퍼 콘솔을 떼어(`vtconsole` 바인딩 해제) 이후의 콘솔 출력이 이미지를 덮지 않게 한다.
+# 이미지는 cage가 화면을 넘겨받을 때까지 남는다. `tf.splash`는 `buildImage`의 `splash` 옵션이, 이미지는 `src/scripts/make-boot.sh`가 넣는다
+# (복구용 부트 이미지에는 없다). `/splash.frames`가 있으면 애니메이션 재생기(`splash-play`)를 백그라운드로 띄운다.
+# 재생기는 switch_root 뒤에도 돌다가 `tf-kiosk`가 cage를 띄우기 전에 종료시킨다.
 
 /bin/busybox mkdir -p /proc /sys /dev /newroot
 /bin/busybox --install -s /bin
@@ -14,6 +20,23 @@ mount -t sysfs sysfs /sys
 mount -t devtmpfs dev /dev
 
 log() { echo "tf-initramfs: $*" >/dev/kmsg; }
+
+splash() {
+  grep -qw tf.splash /proc/cmdline && [ -f /splash.ppm ] || return 0
+  n=0
+  while [ ! -e /dev/fb0 ] && [ $n -lt 30 ]; do
+    sleep 0.1
+    n=$((n + 1))
+  done
+  [ -e /dev/fb0 ] || { log "splash: no framebuffer"; return 0; }
+  for v in /sys/class/vtconsole/vtcon*; do
+    grep -q "frame buffer" "$v/name" 2>/dev/null && echo 0 >"$v/bind"
+  done
+  fbsplash -s /splash.ppm -d /dev/fb0 || { log "splash: draw failed"; return 0; }
+  [ -f /splash.frames ] && [ -x /bin/splash-play ] || return 0
+  splash-play /splash.frames /dev/fb0 </dev/null >/dev/null 2>&1 &
+}
+splash
 
 setup_gadget() {
   mount -t configfs none /sys/kernel/config || return 1

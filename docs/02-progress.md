@@ -206,11 +206,12 @@ src/scripts/build-all.sh
 
 | 산출물 | 기록할 파티션 | 내용 |
 |---|---|---|
-| `images/boot-mainline.img` | `boot` | 메인라인 커널 6.18 + 디바이스 트리 + initramfs |
-| `images/boot-stage1.img` | `recovery` | 순정 4.19 커널 + 같은 initramfs. 복귀용 |
+| `images/boot-mainline.img` | — | 메인라인 커널 6.18 + 디바이스 트리 + initramfs. 부팅 스플래시 그림은 들어 있지 않다 |
+| `boot.img` | `boot` | 위 부트 이미지의 initramfs에 `local/splash/`의 스플래시 그림을 덧붙여 다시 묶은 이미지(아래 "부팅 스플래시"). 스플래시를 끄면 `boot-mainline.img`와 같다 |
+| `images/boot-stage1.img` | `recovery` | 순정 4.19 커널 + 같은 initramfs(재생기 `splash-play`만 뺀 것). 복귀용 |
 | `images/alpine-rootfs.img` | — | Alpine 루트 파일시스템. 기기 고유 값이 없는 공통 이미지 |
 | `userdata.img` | `userdata` | 위 루트 이미지에 `local/device/rootfs/`의 파일을 얹은 이미지 (2.9절) |
-| `images/manifest.txt`, `images/packages.txt`, `images/inputs.txt` | — | 커널 버전·부팅 인자·이미지 해시, 설치된 패키지 목록, 빌드 재료의 Nix 스토어 경로(이 링크가 살아 있는 동안 GC에서 제외된다) |
+| `images/manifest.txt`, `images/packages.txt`, `images/inputs.txt`, `images/boot-inputs.json` | — | 커널 버전·부팅 인자·이미지 해시, 설치된 패키지 목록, 빌드 재료의 Nix 스토어 경로(이 링크가 살아 있는 동안 GC에서 제외된다), `boot.img`를 다시 묶을 재료와 스플래시 설정 |
 
 `dist/images`는 Nix 스토어를 가리키는 심볼릭 링크다. 이 링크가 남아 있는 동안에는 Nix 스토어를 정리(`nix-collect-garbage`)해도 빌드에 쓴 재료(커널 결과, 패키지, 펌웨어)가 지워지지 않는다. `dist/`를 지웠거나 링크가 없는 상태에서 정리했다면 재료가 사라지는데, 이때는 `build-all.sh`가 아카이브에서 다시 넣고 커널부터 재빌드한다(검증됨: 그렇게 다시 만든 이미지 셋이 이전과 바이트 단위로 동일했다).
 
@@ -266,6 +267,13 @@ images = buildImage {
   toss = {
     enable = true;
   };
+  splash = {
+    enable = true;
+    background = "#16181b";
+    width = 640;
+    align = "center";
+    offset = 0;
+  };
 };
 ```
 
@@ -279,8 +287,35 @@ images = buildImage {
 | `kiosk.enable` | `false` | `true`면 부팅 후 화면에 앱 하나를 전체 화면으로 띄우고, 종료되면 다시 띄운다. `false`면 화면에 로그인 프롬프트가 뜬다 |
 | `kiosk.command` | `"foot"` | 실행할 명령. 비루트 사용자 `kiosk`로 실행된다. 기본값은 터미널, 스트림덱 UI는 `"toss-shell"` |
 | `toss.enable` | `false` | `true`면 스트림덱 앱(`src/app/`)을 포함한다: 데몬 `tossd`를 서비스로 올리고 UI 정의를 `/usr/share/toss/ui`에 배치 |
+| `splash.enable` | `false` | `true`면 부팅 중 화면(커널 로그·OpenRC 로그 자리)에 그림이나 애니메이션을 띄운다(아래 "부팅 스플래시"). 부팅 인자에서 `console=tty0`을 빼고 `logo.nologo`, `vt.global_cursor_default=0`, `tf.splash`를 더한다. 그림은 저장소가 아니라 `local/splash/`에 둔다 |
+| `splash.background` | `"#000000"` | 배경색(`"#rrggbb"`). 그림의 투명한 부분과 그림 바깥을 채운다. 그림이 없으면 이 색만 칠한다 |
+| `splash.width` | `0` | 화면(800×1280)에 놓을 그림의 너비(px). 비율을 유지해 크기를 바꾼다. `0`이면 원본 크기 |
+| `splash.align` | `"center"` | 세로 위치: `"center"`, `"top"`, `"bottom"`. 가로는 항상 가운데다 |
+| `splash.offset` | `0` | `align` 기준에서 옮길 거리(px). `top`·`bottom`이면 그 가장자리에서 안쪽으로, `center`면 아래쪽으로(음수면 반대) |
 
-**현재 설정은 `ssh.lan = true`, 공개키 없음, `ntp.enable = true`, `kiosk.enable = true`(스트림덱 UI), `toss.enable = true`다.** 비밀번호 없는 root를 LAN에 연 상태이므로 공유기가 외부 접속을 차단하는 내부망이라는 전제다. 다른 환경이라면 `ssh.lan = false`(기본값)로 두거나 공개키를 등록해야 한다. 옵션을 바꾸면 루트 이미지만 다시 빌드된다.
+**현재 설정은 `ssh.lan = true`, 공개키 없음, `ntp.enable = true`, `kiosk.enable = true`(스트림덱 UI), `toss.enable = true`, 부팅 스플래시(배경 `#16181b`, 가운데 정렬, 너비 640px. 그림은 `local/splash/`)다.** 비밀번호 없는 root를 LAN에 연 상태이므로 공유기가 외부 접속을 차단하는 내부망이라는 전제다. 다른 환경이라면 `ssh.lan = false`(기본값)로 두거나 공개키를 등록해야 한다. 옵션을 바꾸면 루트 이미지만 다시 빌드된다(`splash`는 부트 이미지만).
+
+#### 부팅 스플래시
+
+부팅 중 커널 로그와 OpenRC 로그 대신 그림이나 애니메이션을 띄운다. **그림은 저작권 문제로 저장소에 넣지 않고 `local/splash/`에 둔다**(git 추적 제외. `local/device/`처럼 따로 백업한다). flake는 git이 추적하지 않는 파일을 읽지 못하므로 Nix 빌드는 그림 없이 부트 이미지(`images/boot-mainline.img`)를 만들고, 그림은 빌드 뒤에 `src/scripts/make-boot.sh`가 덧붙인다(`build-all.sh`가 호출).
+
+| 단계 | 하는 일 |
+|---|---|
+| Nix 빌드 | `splash.enable`이면 부팅 인자를 바꾸고 initramfs에 재생기 `splash-play`(`src/os/tools/splash-play.c`, libc 없는 정적 바이너리, 약 2KB)를 넣는다. 재료 경로와 배치 옵션을 `images/boot-inputs.json`에 남긴다 |
+| `make-boot.sh` | `local/splash/splash.png`, `splash.gif`, `splash.webp` 중 처음 찾은 파일을 `src/scripts/splash.py`(Pillow)로 화면 크기(800×1280)에 배치한다. 첫 프레임은 PPM(`splash.ppm`)으로, 애니메이션(APNG·GIF·WebP)이면 나머지 프레임을 `splash.frames`로 만든다. 이 둘을 담은 작은 cpio 묶음을 Nix의 initramfs 뒤에 이어 붙이고(커널은 이어 붙은 묶음을 차례로 모두 푼다) 같은 커널·DTB·부팅 인자로 `dist/boot.img`를 다시 묶는다. 그림이 없으면 배경색만 칠한다. 같은 입력이면 같은 이미지가 나온다 |
+| 기기 | initramfs가 가장 먼저 프레임버퍼 콘솔을 떼고 busybox `fbsplash`로 첫 프레임을 그린다(부팅 약 3.8초, 프레임버퍼가 생긴 직후). 애니메이션이면 `splash-play`를 백그라운드로 띄워 나머지 프레임을 반복 재생한다. 재생기는 switch_root 뒤에도 돌고, `tf-kiosk`가 cage를 띄우기 직전에 종료시킨다 |
+
+애니메이션 프레임은 앞 프레임과 달라진 사각형만 저장하고 재생기도 그 사각형만 덮어쓴다. 그래서 그림의 일부만 움직이면 파일이 작고(지금 쓰는 16프레임 스피너는 약 690KB) CPU 부담도 거의 없다. 화면 전체가 바뀌는 애니메이션은 프레임마다 최대 4MB가 들어가므로, 부트 이미지가 `boot` 파티션(40MB)을 넘으면 `mkboot.sh`가 실패시킨다. 프레임마다 그림 파일에 적힌 재생 시간을 따른다(20ms 미만이나 0이면 100ms).
+
+미리보기는 `dist/splash/preview.png`(첫 화면)와 `dist/splash/preview.gif`(애니메이션, 절반 크기)다. 이후의 커널·OpenRC 출력은 화면이 아니라 시리얼 콘솔(`ttyS2`)과 ramoops로만 가므로 그림은 cage가 화면을 넘겨받을 때까지 남는다. cage가 시작될 때 잠깐 검은 화면이 끼고, 앱이 그려지면 UI로 바뀐다. 앱이 죽어 키오스크가 다시 띄우는 동안에는 마지막으로 그린 프레임이 보인다.
+
+| 화면 | 시점 |
+|---|---|
+| 검은 화면 | 전원 → U-Boot → 커널 초기화(약 3.7초까지). U-Boot는 메인라인 DT에 Rockchip 전용 표시 노드가 없어 화면을 켜지 않는다 |
+| 스플래시(애니메이션이면 재생) | initramfs 시작(약 3.8초) → OpenRC → cage 시작 직전 |
+| 검은 화면(잠깐) | cage가 화면을 넘겨받은 뒤 앱의 첫 화면이 그려질 때까지 |
+
+복구용 부트 이미지(`boot-stage1.img`)에는 스플래시를 넣지 않는다. 키오스크를 끈 이미지(`kiosk.enable = false`)에서는 `tf-console-getty`가 프레임버퍼 콘솔을 다시 붙여 로그인 프롬프트를 보여 준다.
 
 ### 빌드가 생략하는 작업
 
@@ -310,7 +345,7 @@ src/scripts/deploy.sh
 수동으로 기록하려면 기기가 `MaskROM + 로더 적재 상태`여야 한다(2.3절의 `flash.sh --enter`).
 
 ```bash
-src/scripts/flash.sh boot dist/images/boot-mainline.img
+src/scripts/flash.sh boot dist/boot.img
 ```
 
 ```bash
@@ -413,6 +448,7 @@ ramoops 사용 요령: 전원을 뽑으면 내용이 날아가므로 커널이 �
 
 ### initramfs (`src/os/initramfs/init`)
 
+0. 부팅 인자에 `tf.splash`가 있고 `/splash.ppm`이 있으면 프레임버퍼 콘솔을 떼고 스플래시를 그린다. `/splash.frames`가 있으면 애니메이션 재생기를 띄운다(2.6절의 "부팅 스플래시"). 프레임버퍼를 최대 3초 기다리고, 없으면 건너뛴다.
 1. USB 가젯을 올린다: USB 이더넷(RNDIS) + 가상 시리얼(ACM). 루트 파일시스템이 망가져도 Micro USB로 접속할 수 있게 가장 먼저 올린다.
 2. `userdata` 파티션을 찾아 마운트한다. GPT 이름이 `userdata`인 파티션 중 첫 번째이며, 장치가 잡힐 때까지 최대 10초 기다린다.
 3. 이더넷 MAC 주소를 `/etc/tossfront/eth0.mac` 값으로 설정한다.
@@ -506,6 +542,7 @@ arm64 `defconfig`에서 다른 SoC 지원을 모두 끄고 모듈 빌드를 없�
 | `docs/` | 문서 | 추적 |
 | `local/archive/` | 버전 고정한 Alpine 패키지 파일. **백업 대상** | 제외 |
 | `local/device/` | 기기 고유 설정. **백업 대상** | 제외 |
+| `local/splash/` | 부팅 스플래시 그림(저작권 문제로 저장소에 두지 않음). **백업 대상** | 제외 |
 | `local/backup/`, `local/downgrade/`, `local/loader/` | 기기 이미지 | 제외 |
 | `dist/` | 빌드 결과 링크, 플래싱용 이미지, 증분 빌드용 커널 소스, `cargo` 출력. 지워도 다시 생성 가능 | 제외 |
 | `local/analysis/`, `local/lineage/` | 조사 당시 원자료. 재현에는 불필요 | 제외 |
@@ -520,6 +557,7 @@ arm64 `defconfig`에서 다른 SoC 지원을 모두 끄고 모듈 빌드를 없�
 | `alpine-lock.sh` | Alpine 패키지 lock 갱신(`update`), 아카이브에서 복원(`restore`), 아카이브 무결성 확인(`check`) |
 | `build-all.sh` | 이미지 빌드 (`nix build` + 기기 고유 값 반영) |
 | `make-userdata.sh` | 공통 루트 이미지에 `local/device/rootfs/`를 얹어 `dist/userdata.img` 생성 |
+| `make-boot.sh`, `splash.py` | 부트 이미지에 `local/splash/`의 스플래시 그림을 덧붙여 `dist/boot.img` 생성(2.6절의 "부팅 스플래시") |
 | `deploy.sh [-y] [boot] [recovery] [userdata]` | 빌드부터 플래싱·재부팅까지 일괄 실행. 1회 확인 질문(`-y`로 생략) |
 | `app-push.sh` | 스트림덱 앱을 이미지를 굽지 않고 기기에 바로 올려서 테스트 |
 | `tf-tap.sh`, `tf-drag.sh` | 수동 조작 없이 화면 탭·드래그 (터치 입력 장치에 이벤트 주입. UI 동작 테스트용) |
@@ -538,7 +576,8 @@ arm64 `defconfig`에서 다른 SoC 지원을 모두 끄고 모듈 빌드를 없�
 | 수정 대상 | 명령 | 비고 |
 |---|---|---|
 | 커널 설정, 드라이버, 디바이스 트리, 부팅 인자 | `src/scripts/deploy.sh boot` | 설정이나 드라이버를 고치면 커널 전체를 다시 빌드한다(약 3분). 디바이스 트리와 부팅 인자만 바꿨으면 금방 끝난다 |
-| initramfs (`src/os/initramfs/init`) | `src/scripts/deploy.sh boot recovery` | 두 커널이 같은 initramfs를 공유한다 |
+| initramfs (`src/os/initramfs/init`) | `src/scripts/deploy.sh boot recovery` | 두 커널이 같은 initramfs를 쓴다(복구용에는 재생기 `splash-play`만 빠진다) |
+| 부팅 스플래시 (`flake.nix`의 `splash`, `local/splash/`의 그림) | `src/scripts/deploy.sh boot` | 그림만 바꾸면 Nix 빌드 없이 `make-boot.sh`만 다시 묶는다 |
 | 패키지 목록 (`src/os/alpine/packages`) | `src/scripts/alpine-lock.sh update` → `src/scripts/deploy.sh userdata` | **기기에서 직접 바꾼 파일은 모두 초기화된다** |
 | 루트 설정 (`src/os/rootfs/`), 이미지 옵션 (`flake.nix`의 `buildImage` 인자), 기기 고유 값 (`local/device/rootfs/`) | `src/scripts/deploy.sh userdata` | 위와 동일 |
 | 스트림덱 앱 (`src/app/`) | `src/scripts/deploy.sh userdata` | 위와 동일. 개발 중에는 `src/scripts/app-push.sh`로 플래싱 없이 테스트 가능 |
@@ -748,7 +787,7 @@ src/scripts/tf-ssh.sh --reboot recovery
 | 켜진 뒤에 꽂은 Micro USB | 기기가 켜져 있는 상태에서 Micro USB를 PC에 꽂았더니 양쪽 모두 인식하지 못했고(기기의 USB 상태가 `not attached`, 커널 로그에 기록 없음), 기기를 재부팅하자 잡혔다. 한 번 관찰한 것이고 원인은 보지 않았다. 부팅 때 꽂혀 있어야만 USB 가젯이 연결되는 것으로 보인다 |
 | 픽셀 클럭 | 66.67MHz로 잡혀 약 57Hz. 60Hz에 맞추려면 클럭 설정을 봐야 한다 |
 | `clk_ignore_unused`, `pd_ignore_unused` | 초기 안전장치로 넣은 부팅 인자. 빼도 되는지 확인 필요 |
-| 부팅 스플래시 | 부팅 메시지 대신 이미지를 띄우는 것. initramfs에서 그리고 앱이 이어받는 방식이 가능하다(검토만 함). 급하지 않아 미뤘다 |
+| 부팅 스플래시의 남은 검은 구간 | 스플래시는 initramfs부터 cage 직전까지만 덮는다(2.6절). 남은 것: **cage가 화면을 넘겨받을 때의 짧은 검은 화면**(cage가 앱보다 먼저 검은 배경을 그린다. 앱의 첫 프레임까지 출력을 미루는 cage 패치를 따로 검토할 예정), **커널의 DRM 초기화(약 1.6초)와 프레임버퍼 생성(약 3.7초) 사이의 약 2초**(원인 미확인. 줄이면 스플래시가 그만큼 빨리 뜬다), **U-Boot 구간**(로고를 띄우려면 DT에 Rockchip 전용 표시 노드와 패널 초기화 시퀀스, RSCE에 `logo.bmp`가 필요하다. 바이어스 칩 전원, 커널이 화면을 다시 초기화할 때의 깜빡임, IOMMU 오류 위험이 있다) |
 | 터치 드라이버 경고 | 무해. 없애려면 드라이버 패치 필요 |
 | 패키지 설치 스크립트 | 빌드가 건너뛴다(2.6절). 현재 패키지에서 필요한 것은 처리했지만, 패키지를 추가할 때마다 확인이 필요하다 |
 | 커널 설정 조각의 헤더 주석 | `src/os/kernel/toss-front.config`의 둘째 줄이 "디스플레이 없이 부팅"하던 때의 목표를 말하고 있다(지금은 화면·무선까지 들어 있다). 이 파일을 고치면 커널을 재빌드하므로, 다음에 커널 설정을 고칠 때 함께 고친다 |

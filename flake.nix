@@ -48,6 +48,13 @@
         toss = {
           enable = true;
         };
+        splash = {
+          enable = true;
+          background = "#16181b";
+          width = 640;
+          align = "center";
+          offset = 0;
+        };
       };
     in
     {
@@ -95,6 +102,7 @@
       devShells.${system} = {
         default = pkgs.mkShell {
           packages = with pkgs; [
+            (python3.withPackages (ps: [ ps.pillow ]))
             rkdeveloptool
             android-tools
             usbutils
@@ -102,7 +110,6 @@
             e2fsprogs
             xz
             dtc
-            python3
             llvmPackages.clang-unwrapped
             llvmPackages.lld
             llvmPackages.llvm

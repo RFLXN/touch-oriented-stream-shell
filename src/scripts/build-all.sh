@@ -3,10 +3,12 @@
 #
 # 사용법: nix develop -c src/scripts/build-all.sh
 # 생성 결과(`dist/` 아래):
-#   images/boot-mainline.img   -> boot      메인라인 커널 + initramfs
+#   images/boot-mainline.img              메인라인 커널 + initramfs(부팅 스플래시 그림 제외)
 #   images/boot-stage1.img     -> recovery  순정 4.19 커널 + 동일 initramfs(복구용)
 #   images/alpine-rootfs.img                Alpine 루트 파일시스템(기기 고유 정보가 없는 공통 이미지)
 #   images/manifest.txt                     커널 버전, 커맨드라인, 이미지 해시
+#   images/boot-inputs.json                boot-mainline.img의 재료 경로와 부팅 스플래시 설정
+#   boot.img                   -> boot      위 부트 이미지에 `local/splash/`의 스플래시 그림을 덧붙인 최종 이미지(`make-boot.sh`)
 #   userdata.img               -> userdata  위 루트 이미지에 `local/device/rootfs/`를 오버레이한 최종 이미지
 #
 # `dist/images`는 Nix 스토어를 가리키는 심볼릭 링크다. git이 추적하는 작업 트리의 파일(커밋하지 않은 수정 포함)이 같으면 같은 결과가 나온다.
@@ -30,9 +32,11 @@ if ! build; then
   "$here/alpine-lock.sh" restore || echo "[info] local/archive/alpine에 없는 패키지가 있습니다. 미러에서 내려받습니다."
   build
 fi
+"$here/make-boot.sh"
 "$here/make-userdata.sh"
 
 echo
 cat "$top/dist/images/manifest.txt"
+(cd "$top/dist" && sha256sum boot.img)
 echo
 echo "기기 플래싱: src/scripts/deploy.sh   (기기의 userdata 파티션을 통째로 덮어씁니다)"

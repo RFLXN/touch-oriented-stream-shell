@@ -1,6 +1,7 @@
 # initramfs 이미지를 빌드한다. `nix/build.nix`의 `initramfs`가 fakeroot 환경에서 실행한다.
-# 입력(환경 변수): `src`, `busyboxApk`, `regdbApk`, `firmware`, `out`
-# 포함 내용: 정적 busybox, `src/os/initramfs/init`, 무선 펌웨어, 무선 규제 DB(`regulatory.db` 및 서명 파일 — 누락 시 빌드 실패).
+# 입력(환경 변수): `src`, `busyboxApk`, `regdbApk`, `firmware`, `play`(비어 있으면 생략), `out`
+# 포함 내용: 정적 busybox, `src/os/initramfs/init`, 무선 펌웨어, 무선 규제 DB(`regulatory.db` 및 서명 파일 — 누락 시 빌드 실패),
+# 부팅 스플래시 애니메이션 재생기 `/bin/splash-play`(`buildImage`의 `splash.enable`일 때). 스플래시 그림 자체는 `src/scripts/make-boot.sh`가 빌드 뒤에 덧붙인다.
 set -euo pipefail
 
 r=$PWD/initramfs
@@ -9,6 +10,7 @@ mkdir -p "$r/bin" "$r/dev" "$r/lib/firmware" pkg
 tar xzf "$busyboxApk" -C pkg --wildcards '*busybox.static' 2>/dev/null
 install -m 755 "$(find pkg -name busybox.static)" "$r/bin/busybox"
 install -m 755 "$src/src/os/initramfs/init" "$r/init"
+[ -z "${play:-}" ] || install -m 755 "$play" "$r/bin/splash-play"
 
 cp -r "$firmware/." "$r/lib/firmware/"
 tar xzf "$regdbApk" -C pkg --wildcards '*regulatory.db*' 2>/dev/null
