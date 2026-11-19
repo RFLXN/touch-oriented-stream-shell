@@ -22,7 +22,8 @@
 //! 그 페이지를 수정할 수 있는 사람은 호스트에서 명령을 실행할 수 있다.
 //!
 //! API (모두 JSON, 실패 시 `{"error": "사유"}`와 4xx/5xx 반환)
-//!   GET    /api/state                      전체 상태(호스트 정보, 권한 목록, 덱 상태·권한, 명령 목록, 페어링 상태, 허용 출처)
+//!   GET    /api/state                      전체 상태(호스트 정보, 권한 목록, 덱 상태·권한, 명령 목록, 페어링 상태, 허용 출처,
+//!                                          Discord 동작 목록 `discord_actions`, Discord 상주 연결 상태 `discord_live`)
 //!   POST   /api/decks/<키>/perms           `{"id": "command.run", "on": true}` (`on`이 null이면 기본값으로 초기화)
 //!   POST   /api/decks/<키>/forget          페어링 삭제
 //!   POST   /api/decks/<키>/sleep | wake    절전 전환 / 깨우기 (깨우기는 최대 20초 소요)
@@ -32,6 +33,7 @@
 //!   POST   /api/commands/<id>/run          명령 테스트 실행 (run 종류)
 //!   POST   /api/commands/<id>/set          `{"value": "on" | "auto" | 40}` 값 설정 테스트
 //!   GET    /api/commands/<id>/state        현재 상태 조회 → `{"value": 숫자 또는 null, "text": "..."}`
+//!   (Discord 동작 명령의 값 설정과 상태 조회는 이 데몬의 Discord 상주 연결을 쓴다. CLI의 `command set`/`state`도 이 API로 넘긴다)
 //!   POST   /api/pair                       `{"addr": "172.16.42.1"}` 페어링 시작 (진행 상태는 state.pairing 참고)
 //!   POST   /api/pair/confirm               검증 숫자 일치 확인 / POST /api/pair/cancel 페어링 취소
 //!   POST   /api/vault/<서비스>/put         `{"client_id", "client_secret", "redirect_uri"}` 서비스 키를 덱 금고에 저장(이 PC에는 남기지 않음)
@@ -495,7 +497,7 @@ fn api(req: &Request, ctx: &Arc<Ctx>, cfg: &Config) -> ApiResult {
         }
         ("GET", ["commands", id, "state"]) => {
             let c = command(id)?;
-            if c.state.is_empty() {
+            if !c.watched() {
                 return Err(bad("상태 확인 커맨드가 설정되어 있지 않습니다"));
             }
             let value = c.read_value();
@@ -561,6 +563,8 @@ fn state(store: &Store, cmds: &Commands, ctx: &Ctx, cfg: &Config) -> Value {
             })
         })
         .collect();
+    let (held, up, error) = crate::discord::status();
+    let live = json!({ "held": held, "up": up, "error": error });
     json!({
         "host": { "name": crate::link::host_name(), "os": std::env::consts::OS, "version": env!("CARGO_PKG_VERSION") },
         "permissions": trust::PERMISSIONS.iter().map(|p| json!({ "id": p.id, "title": p.title, "about": p.about, "default": p.default })).collect::<Vec<_>>(),
@@ -574,6 +578,8 @@ fn state(store: &Store, cmds: &Commands, ctx: &Ctx, cfg: &Config) -> Value {
         "pairing": ctx.pairing.lock().unwrap().shown(),
         "vault": crate::vault::state().map(|(deck, services)| json!({ "deck": deck, "services": services })),
         "discord": ctx.discord.lock().unwrap().shown(),
+        "discord_live": live,
+        "discord_actions": crate::discord::ACTIONS.iter().map(|a| json!({ "id": a.id, "title": a.title, "kind": a.kind })).collect::<Vec<_>>(),
         "origins": cfg.origins,
         "usb_addr": toss_proto::USB_DECK_ADDR,
     })
@@ -724,7 +730,7 @@ fn discord_start(ctx: &Arc<Ctx>, kind: &'static str) -> Result<(), (u16, String)
 }
 
 /// 실행 중인 toss-connector의 로컬 API를 호출한다(CLI용). 실패하면 사용자에게 보여 줄 문장을 돌려준다.
-fn local_api(dir: &Path, method: &str, path: &str, body: Option<&Value>) -> Result<Value, String> {
+pub fn local_api(dir: &Path, method: &str, path: &str, body: Option<&Value>) -> Result<Value, String> {
     let port = config(dir).port;
     let tok = token(dir).map_err(|e| format!("웹 콘솔 토큰을 읽을 수 없습니다: {e}"))?;
     let mut s = TcpStream::connect_timeout(&SocketAddr::from((Ipv4Addr::LOCALHOST, port)), Duration::from_millis(800))

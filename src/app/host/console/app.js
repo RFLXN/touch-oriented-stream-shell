@@ -15,6 +15,7 @@
 // 사용자 입력(명령 이름, 커맨드 등)을 DOM에 삽입할 때는 XSS 방지를 위해 textContent만 사용한다.
 // 외부 연동(Discord) 키 입력 칸은 HTML에 고정해 두어 1.5초마다 다시 그려도 입력 중인 값이 사라지지 않는다.
 // Client Secret은 덱으로 보내기만 하고 저장에 성공하면 칸을 비운다(브라우저 저장소에도 남기지 않는다).
+// 명령 편집의 "Discord" 종류는 셸 커맨드 대신 Discord 동작(state.discord_actions)을 고른다. 실제 종류(스위치 등)는 동작이 정한다.
 "use strict";
 
 const $ = (id) => document.getElementById(id);
@@ -238,6 +239,11 @@ const kindName = { run: "실행", switch: "스위치", stepped: "단계", linear
 function commandLines(c, kind) {
   const lines = [];
   const line = (what, text) => lines.push(h("dt", {}, what), h("dd", { class: "mono" }, text));
+  if (c.discord) {
+    const a = discordAction(c);
+    line("Discord", c.discord + (a ? " — " + a.title : ""));
+    return lines;
+  }
   if (kind === "run") line("커맨드", c.run);
   if (kind === "switch") { line("켜기", c.on); line("끄기", c.off); }
   if (kind === "stepped") {
@@ -247,6 +253,10 @@ function commandLines(c, kind) {
   if (kind === "linear") { line("범위", (c.min || 0) + " ~ " + (c.max || 0) + " (단위 " + (c.step || 1) + ")"); line("설정", c.set); }
   if (c.state) line("상태", c.state + (c.every ? "   (" + c.every + "초마다)" : ""));
   return lines;
+}
+
+function discordAction(c) {
+  return c.discord ? (state.discord_actions || []).find((a) => a.id === c.discord) : null;
 }
 
 function commandTryIt(c, kind) {
@@ -263,7 +273,7 @@ function commandTryIt(c, kind) {
     const num = h("input", { type: "number", step: c.step || 1, min: c.min || 0, max: c.max || 0, value: c.min || 0 });
     tryIt.append(num, h("button", { class: "key", onclick: () => set(Number(num.value)) }, "적용"));
   }
-  if (c.state) tryIt.append(h("button", { class: "key", onclick: async () => {
+  if (c.state || c.discord) tryIt.append(h("button", { class: "key", onclick: async () => {
     const r = await act("GET", "/api/commands/" + c.id + "/state");
     if (r) shown.textContent = "현재: " + r.text;
   } }, "상태 조회"), shown);
@@ -274,7 +284,7 @@ function commandBox(c, strict) {
   const kind = c.kind || "run";
   return h("div", { class: "box" },
     h("div", { class: "row" },
-      h("div", { class: "text" }, h("div", { class: "title" }, c.name, h("span", { class: "tag" }, kindName[kind] || kind),
+      h("div", { class: "text" }, h("div", { class: "title" }, c.name, c.discord && h("span", { class: "tag" }, "Discord"), h("span", { class: "tag" }, kindName[kind] || kind),
         c.managed && h("span", { class: "tag nix", title: "시스템 설정(Nix)으로 고정된 명령입니다" }, "Nix"), h("small", { class: "mono" }, c.id))),
       !c.managed && !strict && h("div", { class: "keys" },
         h("button", { class: "key", onclick: () => openEditor(c) }, "편집"),
@@ -326,7 +336,9 @@ function openEditor(c) {
   $("editor-error").hidden = true;
   c = c || { kind: "run", steps: [{ name: "" }, { name: "" }] };
   $("e-name").value = c.name || "";
-  $("e-kind").value = c.kind || "run";
+  $("e-discord").replaceChildren(...(state.discord_actions || []).map((a) => h("option", { value: a.id }, a.title + " (" + (kindName[a.kind] || a.kind) + ")")));
+  $("e-kind").value = c.discord ? "discord" : c.kind || "run";
+  if (c.discord) $("e-discord").value = c.discord;
   $("e-kind").disabled = !!editing;
   $("e-run").value = c.run || "";
   $("e-on").value = c.on || "";
@@ -351,7 +363,7 @@ $("editor-cancel").onclick = () => $("editor").close();
 $("editor-form").onsubmit = async (e) => {
   e.preventDefault();
   const kind = $("e-kind").value;
-  const spec = { name: $("e-name").value, kind };
+  const spec = kind === "discord" ? { name: $("e-name").value, discord: $("e-discord").value } : { name: $("e-name").value, kind };
   if (kind === "run") spec.run = $("e-run").value;
   if (kind === "switch") Object.assign(spec, { on: $("e-on").value, off: $("e-off").value });
   if (kind === "stepped") {
@@ -359,7 +371,7 @@ $("editor-form").onsubmit = async (e) => {
     spec.set = $("e-set-stepped").value;
   }
   if (kind === "linear") Object.assign(spec, { min: Number($("e-min").value), max: Number($("e-max").value), step: Number($("e-step").value), set: $("e-set-linear").value });
-  if (kind !== "run") {
+  if (kind !== "run" && kind !== "discord") {
     spec.state = $("e-state").value;
     if ($("e-every").value) spec.every = Number($("e-every").value);
   }
@@ -392,6 +404,9 @@ function drawLinks() {
     : "키와 토큰은 덱 " + (deck ? deck.name : v.deck.slice(0, 12)) + "에 보관됩니다.";
   $("discord-link").disabled = !s || !s.registered || busy;
   $("discord-check").disabled = !s || !s.linked || busy;
+  const live = state.discord_live || {};
+  $("discord-live").textContent = !live.held ? "Discord 동작 명령: 쓰는 덱이 없어 Discord 앱에 상주 연결하지 않았습니다."
+    : live.up ? "Discord 동작 명령: Discord 앱에 연결되어 있습니다." : "Discord 동작 명령: 연결 대기 중" + (live.error ? " — " + live.error : "");
   $("discord-forget").disabled = !s || !s.registered || busy;
   $("d-save").disabled = !v || busy;
   const p = $("discord-progress");

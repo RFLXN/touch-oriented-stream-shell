@@ -65,6 +65,7 @@
           <div class="text">
             <div class="title">Discord <span id="discord-tags"></span></div>
             <div class="note" id="discord-deck"></div>
+            <div class="note" id="discord-live"></div>
           </div>
           <div class="keys">
             <button id="discord-link" class="key accent">Discord 연결</button>
@@ -103,6 +104,7 @@
           <option value="switch">스위치 — 켜기/끄기 전환 (스위치 버튼)</option>
           <option value="stepped">단계 — 여러 단계 중 선택 (단계 노브)</option>
           <option value="linear">범위 — 지정 범위 내 값 조절 (연속 노브)</option>
+          <option value="discord">Discord — Discord 앱 기능 (마이크·헤드셋 음소거 등)</option>
         </select>
       </label>
       <div data-kind="run"><label class="field"><span>실행 커맨드</span><input id="e-run" type="text" spellcheck="false" class="mono" placeholder="예: foot"></label></div>
@@ -126,6 +128,10 @@
         </div>
         <label class="field"><span>값 설정 커맨드 <i>— <code>{}</code> 자리에 값이 들어갑니다.</i></span>
           <input id="e-set-linear" type="text" spellcheck="false" class="mono" placeholder="예: wpctl set-volume @DEFAULT_SINK@ {}%"></label>
+      </div>
+      <div data-kind="discord">
+        <label class="field"><span>Discord 동작 <i>— 상태는 Discord 앱이 알려 주는 값을 따릅니다. 외부 연동의 Discord 연결이 필요합니다.</i></span>
+          <select id="e-discord"></select></label>
       </div>
       <div data-kind="switch stepped linear">
         <label class="field"><span>상태 확인 커맨드 <i id="e-state-hint"></i></span>

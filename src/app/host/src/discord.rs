@@ -20,9 +20,13 @@
 use std::time::Duration;
 
 use serde_json::{json, Value};
-use toss_proto::{SERVICE_DISCORD, VAULT_BEGIN, VAULT_TOKEN};
+use toss_proto::{KIND_SWITCH, SERVICE_DISCORD, VAULT_BEGIN, VAULT_TOKEN};
 
 use crate::vault;
+
+#[cfg(unix)]
+mod live;
+pub use live::{hold, status, Hold};
 
 /// Discord 앱의 승인 창에 사용자가 답하기를 기다리는 시간
 const AUTHORIZE_WAIT: Duration = Duration::from_secs(300);
@@ -52,18 +56,23 @@ pub const STEP_DISCORD: &str = "discord";
 
 #[cfg(unix)]
 mod ipc {
-    use std::io::{Read, Write};
+    use std::collections::VecDeque;
+    use std::io::{ErrorKind, Read, Write};
     use std::os::unix::net::UnixStream;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use serde_json::{json, Value};
 
     use super::{FRAME_MAX, OP_CLOSE, OP_FRAME, OP_HANDSHAKE, OP_PING, OP_PONG, REPLY_WAIT};
 
+    /// Discord 앱과의 IPC 연결 하나. 명령의 응답을 기다리는 동안 도착한 이벤트(`DISPATCH`)는 버리지 않고 쌓아 두었다가 `event`로 돌려준다.
     pub struct Ipc {
         s: UnixStream,
+        buf: Vec<u8>,
+        events: VecDeque<Value>,
+        lost: bool,
     }
 
     /// Discord 앱이 열어 둔 IPC 소켓 후보
@@ -87,22 +96,36 @@ mod ipc {
         format!("{t:x}-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::SeqCst))
     }
 
+    fn late() -> String {
+        "Discord 앱이 제한 시간 안에 응답하지 않았습니다".to_string()
+    }
+
+    fn is_event(v: &Value) -> bool {
+        v["cmd"] == "DISPATCH" && v["nonce"].is_null()
+    }
+
     impl Ipc {
         /// 소켓 후보를 차례로 시도해 HANDSHAKE하고 READY를 받는다
         pub fn connect(client_id: &str, places: &[PathBuf]) -> Result<Self, String> {
             let mut last = "Discord 앱에 연결할 수 없습니다 (Discord 앱이 이 PC에서 실행 중인지 확인하세요)".to_string();
             for path in places {
                 let Ok(s) = UnixStream::connect(path) else { continue };
-                let mut ipc = Ipc { s };
+                let mut ipc = Ipc { s, buf: Vec::new(), events: VecDeque::new(), lost: false };
                 ipc.send(OP_HANDSHAKE, &json!({ "v": 1, "client_id": client_id }))?;
                 match ipc.recv(REPLY_WAIT) {
-                    Ok((OP_FRAME, v)) if v["evt"] == "READY" => return Ok(ipc),
-                    Ok((OP_CLOSE, v)) => last = format!("Discord 앱이 연결을 거절했습니다: {}", v["message"].as_str().unwrap_or("사유 없음")),
-                    Ok(_) => last = "Discord 앱이 예상과 다르게 응답했습니다".into(),
+                    Ok(Some((OP_FRAME, v))) if v["evt"] == "READY" => return Ok(ipc),
+                    Ok(Some((OP_CLOSE, v))) => last = format!("Discord 앱이 연결을 거절했습니다: {}", v["message"].as_str().unwrap_or("사유 없음")),
+                    Ok(Some(_)) => last = "Discord 앱이 예상과 다르게 응답했습니다".into(),
+                    Ok(None) => last = late(),
                     Err(e) => last = e,
                 }
             }
             Err(last)
+        }
+
+        /// 연결이 끊어졌는지 여부(Discord가 돌려준 오류 응답은 해당하지 않는다)
+        pub fn lost(&self) -> bool {
+            self.lost
         }
 
         fn send(&mut self, op: u32, v: &Value) -> Result<(), String> {
@@ -111,44 +134,101 @@ mod ipc {
             frame.extend_from_slice(&op.to_le_bytes());
             frame.extend_from_slice(&(body.len() as u32).to_le_bytes());
             frame.extend_from_slice(body.as_bytes());
-            self.s.write_all(&frame).map_err(|e| format!("Discord 앱에 보낼 수 없습니다: {e}"))
+            self.s.write_all(&frame).map_err(|e| {
+                self.lost = true;
+                format!("Discord 앱에 보낼 수 없습니다: {e}")
+            })
         }
 
-        fn recv(&mut self, wait: Duration) -> Result<(u32, Value), String> {
-            self.s.set_read_timeout(Some(wait)).map_err(|e| e.to_string())?;
-            let lost = |e: std::io::Error| match e.kind() {
-                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => "Discord 앱이 제한 시간 안에 응답하지 않았습니다".to_string(),
-                _ => format!("Discord 앱과의 연결이 끊어졌습니다: {e}"),
-            };
-            let mut head = [0u8; 8];
-            self.s.read_exact(&mut head).map_err(lost)?;
-            let op = u32::from_le_bytes([head[0], head[1], head[2], head[3]]);
-            let len = u32::from_le_bytes([head[4], head[5], head[6], head[7]]) as usize;
-            if len > FRAME_MAX {
-                return Err("Discord 앱이 너무 큰 메시지를 보냈습니다".into());
-            }
-            let mut body = vec![0u8; len];
-            self.s.read_exact(&mut body).map_err(lost)?;
-            Ok((op, serde_json::from_slice(&body).unwrap_or(Value::Null)))
-        }
-
-        /// 명령을 보내고 같은 nonce의 응답을 기다린다. 오류 응답이면 Discord가 알려 준 사유를 돌려준다.
-        pub fn command(&mut self, cmd: &str, args: Value, wait: Duration) -> Result<Value, String> {
-            let nonce = nonce();
-            self.send(OP_FRAME, &json!({ "cmd": cmd, "args": args, "nonce": nonce }))?;
+        /// 프레임 하나를 받는다. `wait` 안에 온전한 프레임이 오지 않으면 `None`(받던 조각은 다음 호출에 이어 붙인다)
+        fn recv(&mut self, wait: Duration) -> Result<Option<(u32, Value)>, String> {
+            let until = Instant::now() + wait;
             loop {
-                match self.recv(wait)? {
-                    (OP_FRAME, v) if v["nonce"] == nonce.as_str() => {
+                if self.buf.len() >= 8 {
+                    let op = u32::from_le_bytes([self.buf[0], self.buf[1], self.buf[2], self.buf[3]]);
+                    let len = u32::from_le_bytes([self.buf[4], self.buf[5], self.buf[6], self.buf[7]]) as usize;
+                    if len > FRAME_MAX {
+                        self.lost = true;
+                        return Err("Discord 앱이 너무 큰 메시지를 보냈습니다".into());
+                    }
+                    if self.buf.len() >= 8 + len {
+                        let v = serde_json::from_slice(&self.buf[8..8 + len]).unwrap_or(Value::Null);
+                        self.buf.drain(..8 + len);
+                        return Ok(Some((op, v)));
+                    }
+                }
+                let left = until.saturating_duration_since(Instant::now());
+                if left.is_zero() {
+                    return Ok(None);
+                }
+                self.s.set_read_timeout(Some(left)).map_err(|e| e.to_string())?;
+                let mut chunk = [0u8; 8192];
+                match self.s.read(&mut chunk) {
+                    Ok(0) => {
+                        self.lost = true;
+                        return Err("Discord 앱과의 연결이 끊어졌습니다".into());
+                    }
+                    Ok(n) => self.buf.extend_from_slice(&chunk[..n]),
+                    Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => return Ok(None),
+                    Err(e) if e.kind() == ErrorKind::Interrupted => {}
+                    Err(e) => {
+                        self.lost = true;
+                        return Err(format!("Discord 앱과의 연결이 끊어졌습니다: {e}"));
+                    }
+                }
+            }
+        }
+
+        /// 요청 프레임을 보내고 같은 nonce의 응답을 기다린다. 오류 응답이면 Discord가 알려 준 사유를 돌려준다.
+        fn request(&mut self, mut frame: Value, wait: Duration) -> Result<Value, String> {
+            let nonce = nonce();
+            frame["nonce"] = json!(nonce);
+            self.send(OP_FRAME, &frame)?;
+            let until = Instant::now() + wait;
+            loop {
+                match self.recv(until.saturating_duration_since(Instant::now()))? {
+                    None => return Err(late()),
+                    Some((OP_FRAME, v)) if v["nonce"] == nonce.as_str() => {
                         return if v["evt"] == "ERROR" {
                             Err(format!("Discord: {} (코드 {})", v["data"]["message"].as_str().unwrap_or("알 수 없는 오류"), v["data"]["code"]))
                         } else {
                             Ok(v["data"].clone())
                         };
                     }
-                    (OP_PING, v) => self.send(OP_PONG, &v)?,
-                    (OP_CLOSE, v) => return Err(format!("Discord 앱이 연결을 닫았습니다: {}", v["message"].as_str().unwrap_or("사유 없음"))),
+                    Some((OP_FRAME, v)) if is_event(&v) => self.events.push_back(v),
+                    Some((OP_PING, v)) => self.send(OP_PONG, &v)?,
+                    Some((OP_CLOSE, v)) => {
+                        self.lost = true;
+                        return Err(format!("Discord 앱이 연결을 닫았습니다: {}", v["message"].as_str().unwrap_or("사유 없음")));
+                    }
                     _ => {}
                 }
+            }
+        }
+
+        /// 명령을 보내고 응답을 기다린다
+        pub fn command(&mut self, cmd: &str, args: Value, wait: Duration) -> Result<Value, String> {
+            self.request(json!({ "cmd": cmd, "args": args }), wait)
+        }
+
+        /// 이벤트를 구독한다(이후 그 이벤트가 `event`로 들어온다)
+        pub fn subscribe(&mut self, evt: &str, args: Value) -> Result<Value, String> {
+            self.request(json!({ "cmd": "SUBSCRIBE", "evt": evt, "args": args }), REPLY_WAIT)
+        }
+
+        /// 구독한 이벤트를 하나 꺼낸다. `wait` 안에 오지 않으면 `None`
+        pub fn event(&mut self, wait: Duration) -> Result<Option<Value>, String> {
+            if let Some(v) = self.events.pop_front() {
+                return Ok(Some(v));
+            }
+            match self.recv(wait)? {
+                Some((OP_FRAME, v)) if is_event(&v) => Ok(Some(v)),
+                Some((OP_PING, v)) => self.send(OP_PONG, &v).map(|()| None),
+                Some((OP_CLOSE, v)) => {
+                    self.lost = true;
+                    Err(format!("Discord 앱이 연결을 닫았습니다: {}", v["message"].as_str().unwrap_or("사유 없음")))
+                }
+                _ => Ok(None),
             }
         }
     }
@@ -196,6 +276,67 @@ pub fn check(step: impl Fn(&'static str)) -> Result<Who, String> {
     step(STEP_DISCORD);
     let mut ipc = ipc::Ipc::connect(&client_id, &ipc::sockets())?;
     who(&ipc.command("AUTHENTICATE", json!({ "access_token": token }), REPLY_WAIT)?)
+}
+
+/// 덱 명령으로 쓸 수 있는 Discord 동작. 명령에 `discord`로 지정하면 셸 커맨드 대신 이 동작을 실행하고,
+/// 상태는 구독한 이벤트(`feed`)의 최신 값에서 읽는다(상태 확인 커맨드를 주기적으로 실행하지 않는다).
+pub struct Action {
+    pub id: &'static str,
+    pub title: &'static str,
+    /// 명령 종류(toss-proto KIND_*). 덱에서 이 종류의 위젯으로 쓴다
+    pub kind: &'static str,
+    feed: &'static str,
+    read: fn(&Value) -> Option<f64>,
+    write: fn(f64) -> (&'static str, Value),
+}
+
+/// Discord 음성 설정 변경 이벤트
+pub const VOICE: &str = "VOICE_SETTINGS_UPDATE";
+
+pub const ACTIONS: &[Action] = &[
+    Action { id: "mute", title: "마이크 음소거", kind: KIND_SWITCH, feed: VOICE, read: |v| v["mute"].as_bool().map(f64::from), write: |x| ("SET_VOICE_SETTINGS", json!({ "mute": x != 0.0 })) },
+    Action { id: "deaf", title: "헤드셋 음소거", kind: KIND_SWITCH, feed: VOICE, read: |v| v["deaf"].as_bool().map(f64::from), write: |x| ("SET_VOICE_SETTINGS", json!({ "deaf": x != 0.0 })) },
+];
+
+/// ID로 Discord 동작을 찾는다
+pub fn action(id: &str) -> Option<&'static Action> {
+    ACTIONS.iter().find(|a| a.id == id)
+}
+
+impl Action {
+    /// 현재 값(Discord에 연결되어 있지 않으면 `None`)
+    pub fn read(&self) -> Option<f64> {
+        live::latest(self.feed).and_then(|v| (self.read)(&v))
+    }
+
+    /// 값을 적용한다(정규화된 값: 스위치는 0 또는 1)
+    pub fn write(&self, value: f64) -> Result<(), String> {
+        let (cmd, args) = (self.write)(value);
+        live::call(cmd, args).map(|_| ())
+    }
+}
+
+#[cfg(not(unix))]
+mod live {
+    use serde_json::Value;
+
+    pub struct Hold(());
+
+    pub fn hold() -> Hold {
+        Hold(())
+    }
+
+    pub fn status() -> (bool, bool, String) {
+        (false, false, "이 운영체제의 Discord 연결은 아직 지원하지 않습니다".into())
+    }
+
+    pub fn latest(_evt: &str) -> Option<Value> {
+        None
+    }
+
+    pub fn call(_cmd: &str, _args: Value) -> Result<Value, String> {
+        Err("이 운영체제의 Discord 연결은 아직 지원하지 않습니다".into())
+    }
 }
 
 #[cfg(not(unix))]

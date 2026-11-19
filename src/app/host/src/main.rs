@@ -71,6 +71,9 @@ const USAGE: &str = "사용법:
                                  --state는 현재 상태를 출력하는 커맨드입니다: 스위치는 on/off(또는 종료 코드 0이 켜짐),
                                  단계는 단계 이름, 범위는 숫자. --every 초(기본 2)마다 확인해 변경 시 덱에 알립니다.
                                  생략하면 마지막으로 설정한 값만 기억합니다.
+  toss-connector command add-discord <이름> <동작>
+                                 Discord 동작 명령 등록. 동작: mute(마이크 음소거 스위치), deaf(헤드셋 음소거 스위치).
+                                 상태는 Discord 앱이 알려 주는 값을 따릅니다(덱 금고의 Discord 연결 필요).
   toss-connector command remove <id 또는 이름>     명령 삭제
   toss-connector command run <id 또는 이름>        로컬 PC에서 테스트 실행
   toss-connector command set <id 또는 이름> <값>   로컬 PC에서 값 적용 테스트 (on/off, 단계 이름, 숫자)
@@ -145,7 +148,7 @@ fn main() {
         "wake" => cli::wake(&store, rest.first()),
         "trust" => cli::trust(&store, rest.first()),
         "allow" | "deny" => cli::set_trust(&store, &rest, command == "allow"),
-        "command" => cli::command(&store.commands(), &rest, &tail),
+        "command" => cli::command(&store.commands(), store.dir(), &rest, &tail),
         "managed" => cli::managed(&store, &rest),
         "console" => console::cli(&store, &rest),
         "discord" => console::discord_cli(&store, rest.first().map(String::as_str)),

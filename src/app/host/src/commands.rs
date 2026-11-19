@@ -23,6 +23,10 @@
 //! linear는 수치, stepped는 등록된 단계 이름, switch는 on/off를 주입한다.
 //!
 //! 설정 디렉터리의 commands.json에 저장하며 호스트의 모든 덱이 같은 목록을 공유한다.
+//! Discord 동작 (discord): 셸 커맨드 대신 `discord`에 Discord 동작 ID(`discord::ACTIONS`, 예: `mute`, `deaf`)를 지정할 수 있다.
+//! 이때 종류는 그 동작이 정하고, 값 설정은 Discord 앱의 로컬 RPC로 보내며, 상태는 Discord가 보내는 변경 이벤트에서 읽는다
+//! (상태 확인 커맨드와 주기는 쓰지 않는다). 연결과 토큰은 `discord::live`가 맡는다(토큰은 덱 금고에서 빌린다).
+//!
 //! 실행은 `sh -c`(윈도우는 `cmd /C`)에 위임한다. run은 프로세스만 띄우고 종료를 대기하지 않으며(GUI 앱 실행이 많음),
 //! 값 설정 커맨드는 순서 역전을 막기 위해 잠깐 종료를 기다린다.
 //! 상태 확인 커맨드는 별도 프로세스 그룹으로 실행해 타임아웃 시 하위 프로세스까지 일괄 종료한다.
@@ -40,7 +44,7 @@ use std::time::{Duration, Instant, SystemTime};
 use serde::{Deserialize, Serialize};
 use toss_proto::{CommandInfo, KIND_LINEAR, KIND_RUN, KIND_STEPPED, KIND_SWITCH};
 
-use crate::jsonfile;
+use crate::{discord, jsonfile};
 
 /// 이름과 커맨드 최대 길이
 const NAME_MAX: usize = 40;
@@ -62,6 +66,8 @@ const EVERY_MAX: f64 = 3600.0;
 const STATE_WAIT: Duration = Duration::from_secs(3);
 /// 값 설정 커맨드 대기 타임아웃. 초과 시 백그라운드로 넘기고 다음 작업 진행
 const SET_WAIT: Duration = Duration::from_secs(5);
+/// Discord 동작 명령의 값을 다시 읽는 주기(이벤트로 갱신된 메모리 값을 읽으므로 짧다)
+const DISCORD_EVERY: Duration = Duration::from_millis(100);
 /// 값 설정 후 상태 반영이 지연되는 프로그램을 위해 상태를 한 번 더 재조회하기까지의 지연 시간
 const RECHECK: Duration = Duration::from_millis(400);
 
@@ -109,6 +115,9 @@ pub struct Command {
     /// 상태 확인 주기 (초). 0이면 기본값 사용
     #[serde(default, skip_serializing_if = "is_zero")]
     pub every: f64,
+    /// 셸 커맨드 대신 실행할 Discord 동작 ID(`discord::ACTIONS`)
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub discord: String,
 }
 
 pub(crate) fn kind_run() -> String {
@@ -141,13 +150,31 @@ impl Command {
         Self { name: name.into(), kind: KIND_LINEAR.into(), min, max, step, set: set.into(), state: state.into(), ..Self::default() }
     }
 
+    /// Discord 동작 명령 생성(종류는 동작이 정한다)
+    pub fn discord(name: &str, action: &str) -> Self {
+        Self { name: name.into(), kind: discord::action(action).map_or(KIND_RUN, |a| a.kind).into(), discord: action.into(), ..Self::default() }
+    }
+
     /// 상태 값을 가지는 명령인지 여부
     pub fn has_value(&self) -> bool {
         self.kind != KIND_RUN
     }
 
+    /// 지정한 Discord 동작(셸 커맨드 명령이면 `None`)
+    pub fn action(&self) -> Option<&'static discord::Action> {
+        (!self.discord.is_empty()).then(|| discord::action(&self.discord)).flatten()
+    }
+
+    /// 현재 값을 알아낼 수 있는지 여부(상태 확인 커맨드나 Discord 이벤트)
+    pub fn watched(&self) -> bool {
+        self.has_value() && (!self.state.is_empty() || self.action().is_some())
+    }
+
     /// 상태 확인 주기 반환(미지정 시 기본값, 범위 초과 시 클램프)
     fn every(&self) -> Duration {
+        if self.action().is_some() {
+            return DISCORD_EVERY;
+        }
         Duration::from_secs_f64(if self.every > 0.0 { self.every.clamp(EVERY_MIN, EVERY_MAX) } else { EVERY_DEFAULT })
     }
 
@@ -180,6 +207,11 @@ impl Command {
             return Err(format!("이름은 1~{NAME_MAX}자여야 합니다"));
         }
         let mut c = Command { id: self.id.clone(), name: name.to_string(), kind: self.kind.clone(), ..Command::default() };
+        if !self.discord.is_empty() {
+            let a = discord::action(&self.discord).ok_or_else(|| format!("알 수 없는 Discord 동작: {} (사용 가능: {})", self.discord, discord::ACTIONS.iter().map(|a| a.id).collect::<Vec<_>>().join(", ")))?;
+            (c.kind, c.discord) = (a.kind.to_string(), a.id.to_string());
+            return Ok(c);
+        }
         match self.kind.as_str() {
             KIND_RUN => {
                 c.run = line("실행", &self.run, true)?;
@@ -278,12 +310,18 @@ impl Command {
     /// 값 설정 커맨드 실행 및 완료 대기. 실행하지 못했거나 커맨드가 실패로 끝나면 그 사유를 반환한다.
     /// 타임아웃 내 미종료 시 백그라운드 실행으로 두고 성공 처리(GUI 실행 등 고려).
     pub fn set_value(&self, value: f64) -> Result<(), String> {
+        if let Some(a) = self.action() {
+            return a.write(value);
+        }
         let (line, text) = self.set_line(value).ok_or("값을 설정할 수 없는 명령 종류입니다")?;
         run_wait(&line, &text, SET_WAIT)
     }
 
     /// 상태 확인 커맨드를 실행해 현재 값을 파싱한다. 실패 시 None
     pub fn read_value(&self) -> Option<f64> {
+        if let Some(a) = self.action() {
+            return a.read();
+        }
         if self.state.is_empty() || !self.has_value() {
             return None;
         }
@@ -562,6 +600,9 @@ impl Commands {
         if cmd.kind != KIND_RUN {
             return Err(Error::Invalid("단발성 실행(run) 명령이 아닙니다".into()));
         }
+        if let Some(a) = cmd.action() {
+            return a.write(1.0).map_err(Error::Io);
+        }
         start(&cmd.run).map_err(Error::Io)
     }
 }
@@ -710,6 +751,7 @@ impl Watcher {
             let mut due: HashMap<String, Instant> = HashMap::new();
             let mut again: HashMap<String, Instant> = HashMap::new();
             let mut wanted: Vec<(String, f64)> = Vec::new();
+            let mut hold: Option<discord::Hold> = None;
             loop {
                 if wanted.is_empty() {
                     match rx.recv_timeout(Duration::from_millis(100)) {
@@ -729,6 +771,9 @@ impl Watcher {
                     known.retain(|id, _| same(id));
                     due.retain(|id, _| same(id));
                     list = fresh;
+                    if list.iter().any(|c| c.action().is_some()) != hold.is_some() {
+                        hold = hold.is_none().then(discord::hold);
+                    }
                 }
                 let mut latest: Vec<(String, f64)> = Vec::new();
                 for (id, v) in wanted.drain(..) {
@@ -741,7 +786,7 @@ impl Watcher {
                     if let Err(e) = &done {
                         eprintln!("명령 {}: 값을 설정하지 못했습니다: {e}", c.name);
                     }
-                    if !c.state.is_empty() {
+                    if c.watched() {
                         let now = Instant::now();
                         known.remove(&id);
                         due.insert(id.clone(), now);
@@ -750,7 +795,7 @@ impl Watcher {
                         on_value(id, Some(value));
                     }
                 }
-                for c in list.iter().filter(|c| c.has_value() && !c.state.is_empty()) {
+                for c in list.iter().filter(|c| c.watched()) {
                     let now = Instant::now();
                     if due.get(&c.id).is_some_and(|t| now < *t) {
                         continue;
@@ -1073,4 +1118,23 @@ mod tests {
         assert!(gone(&slow), "타임아웃된 커맨드의 자식 프로세스가 남아 있음");
         let _ = fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn discord_commands_take_their_kind_from_the_action_and_drop_shell_lines() {
+        let (cmds, dir) = temp("discord");
+        let spec = Command { on: "rm -rf ~".into(), state: "true".into(), every: 5.0, ..Command::discord("Mic", "mute") };
+        let c = cmds.add(spec).unwrap();
+        assert_eq!((c.kind.as_str(), c.discord.as_str(), c.on.as_str(), c.state.as_str(), c.every), (KIND_SWITCH, "mute", "", "", 0.0));
+        assert!(c.watched() && c.action().is_some());
+        assert_eq!(c.info(), CommandInfo { kind: KIND_SWITCH.into(), ..CommandInfo::run(&c.id, "Mic") });
+        let forced = cmds.add(Command { kind: KIND_LINEAR.into(), ..Command::discord("Deaf", "deaf") }).unwrap();
+        assert_eq!(forced.kind, KIND_SWITCH);
+        assert!(cmds.add(Command::discord("Nope", "self_destruct")).unwrap_err().to_string().contains("mute"));
+        let saved = fs::read_to_string(dir.join("commands.json")).unwrap();
+        assert!(saved.contains("\"discord\": \"mute\"") && !saved.contains("rm -rf"), "{saved}");
+        assert_eq!(cmds.by_id(&c.id), Some(c.clone()));
+        assert!(!Command::run("Plain", "true").watched());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
 }

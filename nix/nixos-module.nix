@@ -25,6 +25,7 @@
 #     commands = [
 #       { name = "Terminal"; run = "foot"; }
 #       { name = "Mic"; kind = "switch"; on = "..."; off = "..."; state = "..."; }
+#       { name = "Discord Mic"; discord = "mute"; }    # Discord 동작(덱 금고의 Discord 연결 필요)
 #     ];
 #   };
 # `strict = false`면 선언된 항목만 고정하고(해제 불가 권한, 수정/삭제 불가 명령) 나머지 권한과 명령은 사용자가 추가할 수 있다.
@@ -147,6 +148,16 @@ let
         type = lib.types.nullOr lib.types.number;
         default = null;
         description = "상태 폴링 주기(초, 생략 시 2초).";
+      };
+      discord = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "mute";
+        description = ''
+          셸 커맨드 대신 실행할 Discord 동작. `mute`(마이크 음소거 스위치), `deaf`(헤드셋 음소거 스위치).
+          지정하면 종류는 동작이 정하고(`kind`는 무시), 상태는 Discord 앱이 알려 주는 값을 따른다.
+          덱 금고의 Discord 연결이 필요하다(`docs/04-host-link.md` 4.15절).
+        '';
       };
     };
   };

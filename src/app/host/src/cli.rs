@@ -211,7 +211,7 @@ fn options(words: &[String], known: &[&str]) -> Vec<(String, String)> {
 }
 
 /// `toss-connector command ...`: 덱 명령 위젯용 명령 관리 및 로컬 테스트 실행
-pub fn command(cmds: &Commands, rest: &[String], tail: &[String]) {
+pub fn command(cmds: &Commands, dir: &std::path::Path, rest: &[String], tail: &[String]) {
     let pick = |key: Option<&String>| {
         let key = key.unwrap_or_else(|| usage("명령 ID 또는 이름을 지정하세요 (toss-connector command list 참고)"));
         cmds.find(key).unwrap_or_else(|| fail("일치하는 명령이 없거나 여러 개가 해당합니다"))
@@ -225,7 +225,7 @@ pub fn command(cmds: &Commands, rest: &[String], tail: &[String]) {
     let registered = |c: Command| {
         let c = cmds.add(c).unwrap_or_else(|e| fail(&e.to_string()));
         println!("등록됨: {}  {}  ({})", c.id, c.name, c.kind);
-        if c.has_value() && c.state.is_empty() {
+        if c.has_value() && !c.watched() {
             println!("상태 확인 커맨드(--state)가 없어 마지막으로 설정한 값만 표시됩니다 (PC에서 직접 바꾼 상태는 감지 못 함).");
         }
         println!("덱에서 사용하려면 권한을 허용하세요: toss-connector allow command.run");
@@ -244,7 +244,12 @@ pub fn command(cmds: &Commands, rest: &[String], tail: &[String]) {
             for c in list {
                 println!("{}  {:<8} {}{}", c.id, c.kind, c.name, if fixed.contains(&c.id) { "   [Nix]" } else { "" });
                 let mut lines: Vec<(String, &str)> = Vec::new();
+                let shown;
                 match c.kind.as_str() {
+                    _ if c.action().is_some() => {
+                        shown = c.action().map(|a| format!("{} ({})", a.id, a.title)).unwrap_or_default();
+                        lines.push(("discord".to_string(), shown.as_str()));
+                    }
                     toss_proto::KIND_SWITCH => lines.extend([("on".to_string(), c.on.as_str()), ("off".to_string(), c.off.as_str())]),
                     toss_proto::KIND_STEPPED => {
                         lines.extend(c.steps.iter().map(|s| (format!("step {}", s.name), if s.run.is_empty() { "(set)" } else { s.run.as_str() })));
@@ -283,6 +288,12 @@ pub fn command(cmds: &Commands, rest: &[String], tail: &[String]) {
             let range = (number(&o, "min", 0.0), number(&o, "max", 100.0), number(&o, "step", 1.0));
             registered(Command { every: number(&o, "every", 0.0), ..Command::linear(name(), range, &one(&o, "set"), &one(&o, "state")) });
         }
+        Some("add-discord") => {
+            let actions = || crate::discord::ACTIONS.iter().map(|a| format!("  {:<6} {} ({})", a.id, a.title, a.kind)).collect::<Vec<_>>().join("\n");
+            let Some(action) = after_name.first() else { usage(&format!("Discord 동작을 지정하세요: toss-connector command add-discord <이름> <동작>\n{}", actions())) };
+            registered(Command::discord(name(), action));
+            println!("Discord 동작은 덱이 연결되어 있는 동안 실행 중인 toss-connector가 Discord 앱에 연결해 처리합니다 (덱 금고의 Discord 연결이 필요).");
+        }
         Some("remove") => {
             let c = pick(rest.get(1));
             cmds.remove(&c.id).unwrap_or_else(|e| fail(&e.to_string()));
@@ -299,6 +310,10 @@ pub fn command(cmds: &Commands, rest: &[String], tail: &[String]) {
         Some("set") => {
             let c = pick(rest.get(1));
             let text = rest.get(2).unwrap_or_else(|| usage("설정할 값을 지정하세요: toss-connector command set <이름> <값>"));
+            if c.action().is_some() {
+                let r = crate::console::local_api(dir, "POST", &format!("/api/commands/{}/set", c.id), Some(&serde_json::json!({ "value": text }))).unwrap_or_else(|e| fail(&e));
+                return println!("적용됨: {} = {}", c.name, r["text"].as_str().unwrap_or_default());
+            }
             let value = c.parse_value(text).unwrap_or_else(|e| fail(&e));
             c.set_value(value).unwrap_or_else(|e| fail(&format!("값 설정 실패: {e}")));
             println!("적용됨: {} = {}", c.name, c.show_value(Some(value)));
@@ -314,6 +329,10 @@ pub fn command(cmds: &Commands, rest: &[String], tail: &[String]) {
         }
         Some("state") => {
             let c = pick(rest.get(1));
+            if c.action().is_some() {
+                let r = crate::console::local_api(dir, "GET", &format!("/api/commands/{}/state", c.id), None).unwrap_or_else(|e| fail(&e));
+                return println!("{}", r["text"].as_str().unwrap_or_default());
+            }
             if c.state.is_empty() {
                 fail("이 명령에는 상태 확인 커맨드(--state)가 설정되어 있지 않습니다");
             }

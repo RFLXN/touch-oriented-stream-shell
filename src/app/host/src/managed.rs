@@ -84,6 +84,8 @@ struct WrittenCommand {
     state: String,
     #[serde(default)]
     every: f64,
+    #[serde(default)]
+    discord: String,
 }
 
 #[derive(Deserialize)]
@@ -96,9 +98,9 @@ struct WrittenStep {
 
 impl From<WrittenCommand> for Command {
     fn from(c: WrittenCommand) -> Self {
-        let WrittenCommand { id, name, kind, run, on, off, steps, set, min, max, step, state, every } = c;
+        let WrittenCommand { id, name, kind, run, on, off, steps, set, min, max, step, state, every, discord } = c;
         let steps = steps.into_iter().map(|WrittenStep { name, run }| Step { name, run }).collect();
-        Command { id, name, kind, run, on, off, steps, set, min, max, step, state, every }
+        Command { id, name, kind, run, on, off, steps, set, min, max, step, state, every, discord }
     }
 }
 

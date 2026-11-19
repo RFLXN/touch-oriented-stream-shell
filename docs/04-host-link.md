@@ -284,6 +284,8 @@ NixOS에서는 시스템 설정으로 권한을 고정할 수도 있다(`program
 | `stepped` | 고정 단계 선택(예: off / passive / active / auto) | 단계 이름 목록 및 단계별 실행 커맨드 | 단계 노브 |
 | `linear` | 연속 범위 값 조절(예: 0~100) | 범위, 단위, 값 설정 커맨드 | 연속 노브 |
 
+셸 커맨드 대신 **Discord 동작**을 지정할 수도 있다(`discord` 항목, 아래 "Discord 동작"). 이때 종류는 동작이 정한다.
+
 **공통 동작**
 
 - **명령은 PC에 등록해 둔다**(`toss-connector command add…`). 설정 디렉터리의 `commands.json`에 저장되며 해당 PC의 모든 덱이 같은 목록을 공유한다.
@@ -331,6 +333,24 @@ toss-connector allow command.run                     # 덱에 실행 권한 부�
 ```
 
 (위 커맨드들은 예시이며, 실기기 검증에서는 파일 읽기/쓰기 커맨드를 사용했다.)
+
+**Discord 동작 (`discord`)**: 셸 커맨드 대신 이 PC의 Discord 앱 기능을 실행하는 명령이다. 덱 쪽은 다른 명령과 같다(같은 위젯, 같은 `command.set`과 `command_value`). 그래서 덱–PC 프로토콜에는 바뀐 것이 없다.
+
+| 동작 | 종류 | 켜기/끄기 | 상태 |
+|---|---|---|---|
+| `mute` | `switch` | Discord 마이크 음소거 켜기/끄기(`SET_VOICE_SETTINGS`의 `mute`) | Discord가 보내는 `VOICE_SETTINGS_UPDATE`의 `mute` |
+| `deaf` | `switch` | Discord 헤드셋 음소거 켜기/끄기(`deaf`) | 같은 이벤트의 `deaf` |
+
+- 상태 확인 커맨드를 실행하지 않는다. 커넥터가 Discord 앱에 상주 연결해 변경 이벤트를 구독하고, 그 최신 값을 덱에 보낸다. 그래서 Discord 화면이나 Discord 단축키로 바꾼 상태도 곧바로 덱에 반영된다.
+- Discord의 규칙상 헤드셋 음소거를 켜면 마이크 음소거도 켜지고, 헤드셋 음소거 중에 마이크 음소거를 끄면 헤드셋 음소거도 풀린다. 덱의 표시등은 Discord가 알려 주는 실제 상태를 따른다.
+- 상주 연결은 Discord 동작 명령이 등록되어 있고, 그 명령을 쓰는 덱(`command.run` 허용)이 연결되어 있는 동안만 유지한다. 토큰은 연결할 때 덱 금고에서 빌려 인증에만 쓴다(4.15절). Discord 앱이 꺼져 있거나 연결이 끊어지면 상태를 알 수 없음(`null`)으로 보내고, 3초부터 최대 60초 간격으로 다시 연결한다.
+- `toss-connector command set`/`state`는 Discord 동작 명령이면 실행 중인 `toss-connector`의 웹 콘솔 API로 넘긴다(상주 연결이 그 프로세스에 있기 때문이다).
+- 동작 목록은 `src/app/host/src/discord.rs`의 `ACTIONS`다. 새 동작은 이 표에 한 줄(종류, 읽을 이벤트 필드, 보낼 명령)을 더하면 되고, 새 이벤트를 쓰려면 `discord/live.rs`의 `FEEDS`에 (현재 값을 읽는 명령, 구독할 이벤트)를 더한다.
+
+```bash
+toss-connector command add-discord 'Discord Mic' mute       # Discord 마이크 음소거 스위치
+toss-connector command add-discord 'Discord Headset' deaf   # Discord 헤드셋 음소거 스위치
+```
 
 ### 리소스 모니터링 (`metrics`, `metric_values`, `watch`)
 
@@ -508,6 +528,7 @@ nix build .#toss-connector -o dist/toss-connector && ./dist/toss-connector/bin/t
 | `toss-connector command add-switch <이름> --on <명령> --off <명령> [--state <명령>] [--every <초>]` | 스위치 등록 |
 | `toss-connector command add-stepped <이름> --step <단계[=명령]>… [--set <명령>] [--state <명령>] [--every <초>]` | 단계 등록(2~12개). 단계별 커맨드를 지정하거나, 이름만 적고 `--set`의 `{}` 자리에 단계 이름이 들어가게 함 |
 | `toss-connector command add-linear <이름> --set <명령> [--min 0] [--max 100] [--step 1] [--state <명령>] [--every <초>]` | 범위 등록. `--set`의 `{}` 자리에 값이 들어감 |
+| `toss-connector command add-discord <이름> <동작>` | Discord 동작 명령 등록(`mute`, `deaf`. 4.6절 "Discord 동작") |
 | `toss-connector command set <id 또는 이름> <값>` / `state <id 또는 이름>` | PC에서 값 설정 테스트, 현재 상태 조회 테스트(등록한 커맨드가 맞는지 확인할 때). `set`은 해당 명령의 커맨드만 실행: 스폰에 실패하거나 커맨드가 실패로 끝나면 사유를 출력하고 종료 코드 1로 종료. 상태 조회 커맨드가 있으면 설정한 값이 보일 때까지 최대 4초 동안 조회한 뒤 현재 상태를 출력 |
 | `toss-connector managed` | 관리형 설정(NixOS 모듈의 `config`) 조회: strict 여부, 고정된 권한과 명령 |
 | `toss-connector managed check <파일>` | 관리형 설정 파일을 검증하고 정리한 결과를 출력(모듈이 빌드 중에 사용. 오류가 있으면 실패) |
@@ -547,7 +568,8 @@ nix build .#toss-connector -o dist/toss-connector && ./dist/toss-connector/bin/t
 | `src/meter.rs` | PC 리소스를 측정해 덱으로 보내는 스레드: 덱이 구독 중인 항목만, 바뀐 값만. 측정 자체는 `src/app/meter`(덱과 공용인 크레이트)가 담당 |
 | `src/console.rs` | 웹 콘솔: 정적 파일을 서빙하고 API를 받는 작은 HTTP 서버, 토큰과 Origin 검증, 콘솔에서 진행하는 페어링과 Discord 연결. `discord` CLI도 이 API를 호출한다 |
 | `src/vault.rs` | 덱 금고 요청 중계: 웹 콘솔과 CLI의 요청을 지금 연결된 덱 세션으로 보내고 응답을 기다린다. 덱이 알려 준 금고 상태 기록 |
-| `src/discord.rs` | Discord 앱의 로컬 RPC(IPC 소켓) 클라이언트와 연결(`link`)·확인(`check`) 절차 |
+| `src/discord.rs` | Discord 앱의 로컬 RPC(IPC 소켓) 클라이언트, 연결(`link`)·확인(`check`) 절차, 명령으로 쓸 수 있는 Discord 동작 목록(`ACTIONS`) |
+| `src/discord/live.rs` | Discord 상주 연결: 쓰는 곳이 있는 동안 연결을 유지하고(재연결 포함) 구독한 이벤트의 최신 값을 기억한다. Discord 동작 명령이 이 연결로 값을 쓰고 읽는다 |
 | `src/web.rs` | 웹페이지 열기(`web.open`): 주소 검증과 `xdg-open` 실행 |
 | `console/` | 웹 콘솔의 프론트엔드(정적 파일 3개). 빌드 시 바이너리에 내장 |
 
@@ -678,7 +700,7 @@ toss-connector console         # 브라우저로 열기 (토큰 자동 첨부)
 
 | API | 동작 |
 |---|---|
-| `GET /api/state` | 전체 상태 스냅샷: 호스트 정보, 권한 테이블, 덱 목록(연결 상태, 권한), 명령 목록, 페어링 진행 상태, 허용 Origin 목록 |
+| `GET /api/state` | 전체 상태 스냅샷: 호스트 정보, 권한 테이블, 덱 목록(연결 상태, 권한), 명령 목록, 페어링 진행 상태, 허용 Origin 목록, Discord 동작 목록(`discord_actions`)과 상주 연결 상태(`discord_live`) |
 | `POST /api/decks/<키>/perms` | `{"id": "command.run", "on": true}`. `on`이 `null`이면 기본값으로 복원 |
 | `POST /api/decks/<키>/forget`, `sleep`, `wake` | 페어링 삭제, 절전 진입, 웨이크업(최대 20초 대기) |
 | `POST /api/commands`, `PUT`·`DELETE /api/commands/<id>` | 명령 등록, 수정(ID 유지), 삭제 |
@@ -805,7 +827,7 @@ toss-connector console         # 브라우저로 열기 (토큰 자동 첨부)
 | 호스트 페어링 UI | 웹 콘솔에서 검증 코드 확인 후 수락, 또는 터미널 `y` 입력 | 페어링 요청 시 데스크톱 알림 |
 | 자동 실행 | NixOS 모듈(`programs.toss-connector.enable`)이 systemd 사용자 서비스로 등록해 로그인 시 자동 실행 | 타 리눅스 배포판(유닛 파일 수동 배치), Windows, macOS |
 | 절전 | 덱 설정 또는 `toss-connector sleep`으로 진입, `toss-connector wake`로 웨이크업(Wi-Fi 매직 패킷) | 이더넷 웨이크업(안 됨), 터치 웨이크업, 깊은 절전 ([01-findings.md](01-findings.md)). 웨이크업 대상이 해당 덱 키가 맞는지 검증(현재 `wake`는 알려진 덱 IP 중 아무나 접속을 받으면 깨어난 것으로 간주) |
-| 외부 연동 | 덱 금고에 Discord 앱 키를 보관하고, 덱이 토큰을 발급·갱신해 PC에 빌려줌(4.15절) | Discord 음소거·헤드셋 끄기 위젯(토큰은 빌릴 수 있으나 음성 제어는 아직 없음). 실제 Discord 앱과의 승인·인증 확인. 덱이 인터넷에 연결되지 않았을 때 PC를 거쳐 토큰 주소로 중계 |
+| 외부 연동 | 덱 금고에 Discord 앱 키를 보관하고, 덱이 토큰을 발급·갱신해 PC에 빌려줌(4.15절). Discord 마이크·헤드셋 음소거 명령(상태는 Discord 이벤트로 반영, 4.6절) | 그 밖의 Discord 기능(입출력 음량, 음성 채널 등). 덱이 인터넷에 연결되지 않았을 때 PC를 거쳐 토큰 주소로 중계 |
 | 블루투스 | 미지원 | 추후 검토 |
 
 **설계 확정 사항 (2026-11-17)**
@@ -943,11 +965,14 @@ Discord처럼 외부 서비스와 연동하는 기능에 필요한 키를 덱에
 3. PC가 승인 코드를 덱에 넘기면(`token`의 `code`) 덱이 토큰을 발급받아 `refresh_token`을 보관하고 `access_token`만 빌려준다.
 4. PC가 빌린 토큰으로 Discord 앱에 `AUTHENTICATE`해 확인한다.
 
-토큰은 Discord 계정과 앱에 묶이고 PC와는 무관하다. 그래서 같은 계정이면 다른 PC에서는 승인 창 없이 `토큰 확인`(`toss-connector discord check`)만으로 쓸 수 있다. 음소거·헤드셋 끄기 같은 음성 제어는 아직 만들지 않았다.
+토큰은 Discord 계정과 앱에 묶이고 PC와는 무관하다. 그래서 같은 계정이면 다른 PC에서는 승인 창 없이 `토큰 확인`(`toss-connector discord check`)만으로 쓸 수 있다.
+
+**명령에서 쓰기**: Discord 동작 명령(4.6절 "Discord 동작")을 등록하면 커넥터가 Discord 앱에 상주 연결한다(`src/app/host/src/discord/live.rs`). 연결할 때마다 덱에서 토큰을 빌려 `AUTHENTICATE`하고, 현재 값을 읽은 뒤(`GET_VOICE_SETTINGS`) 변경 이벤트를 구독한다(`SUBSCRIBE VOICE_SETTINGS_UPDATE`). 덱이 이 PC의 금고 사용을 거절했으면 5분 동안 다시 시도하지 않는다. 연결 상태는 웹 콘솔의 "외부 연동"에 표시된다.
 
 ### 관련 코드와 검증
 
 - 덱: `src/app/tossd/src/hosts/vault.rs`(보관, 암호화, 허용, 토큰 발급·갱신), `hosts/session.rs`(요청마다 별도 스레드에서 처리), UI는 `shell/VaultAsk.qml`(허용 다이얼로그)과 `shell/VaultPage.qml`(설정).
-- PC: `src/app/host/src/vault.rs`(데몬 세션으로 요청 중계), `discord.rs`, `console.rs`(웹 콘솔 API와 `discord` CLI). `discord` CLI는 실행 중인 `toss-connector`의 웹 콘솔 API를 호출하므로 웹 콘솔을 끄면(`--no-console`) 쓸 수 없다.
+- PC: `src/app/host/src/vault.rs`(데몬 세션으로 요청 중계), `discord.rs`, `discord/live.rs`(상주 연결), `console.rs`(웹 콘솔 API와 `discord` CLI). `discord` CLI는 실행 중인 `toss-connector`의 웹 콘솔 API를 호출하므로 웹 콘솔을 끄면(`--no-console`) 쓸 수 없다.
 - 확인한 것(2026-11-19): 덱 단위 테스트(암호화 저장과 0600 권한, 다른 키로 열 수 없는 파일의 백업, 허용·거절·busy·연결 끊김 시 질문 회수, 키 형식 검증, 가짜 토큰 주소로 발급·재사용·갱신·갱신 토큰 교체·거절 시 연결 해제), 덱 통합 테스트(호스트 요청 → 화면 질문 → 허용 → 호스트와 화면에 상태 반영, 해제와 삭제), PC 단위 테스트(가짜 Discord IPC로 HANDSHAKE, ping 응답, 다른 이벤트 건너뛰기, 오류 응답). PC에서 덱 데몬과 커넥터를 실제로 띄워 페어링 → `discord set`(덱 화면 질문에 `ALLOW`) → 상태 조회 → `check`(승인 전이라 `not_linked`) → 허용 해제 → `forget`까지 확인했고, 비밀 값이 덱 파일·PC 설정 디렉터리·로그 어디에도 평문으로 남지 않는 것을 확인했다.
-- 확인하지 못한 것: 실제 Discord 앱과 Discord 토큰 주소를 거친 승인·발급·인증(앱 키가 필요하다), 기기(aarch64)에서의 HTTPS 요청, 덱 화면의 다이얼로그와 설정 화면(문법 검사만 함).
+- 실기기 확인(2026-11-19): 사용자가 실제 Discord 앱 키를 저장하고 승인해 덱이 토큰 주소에서 토큰을 발급받았다(기기의 HTTPS 포함). 빌린 토큰의 권한 범위에 `rpc.voice.read`, `rpc.voice.write`가 들어 있었고, `GET_VOICE_SETTINGS`, `SET_VOICE_SETTINGS`, `VOICE_SETTINGS_UPDATE` 구독이 실제 Discord 앱에서 동작했다. Discord 동작 명령 2개(`mute`, `deaf`)를 덱의 스위치 위젯에 연결해, Discord 단축키로 바꾼 상태와 CLI로 바꾼 상태가 곧바로 반영되고 덱 화면의 표시등이 실제 상태와 일치하는 것을 확인했다. PC 단위 테스트에는 상주 연결의 작업 루프(명령 응답, 응답 전에 온 이벤트 보존, 둘로 나뉘어 도착한 프레임, 쓰는 곳이 없어지면 종료)와 Discord 동작 명령의 등록 규칙을 더했다.
+- 확인하지 못한 것: Discord 앱을 껐다 켰을 때의 재연결, 토큰이 만료된 뒤(7일) 다시 빌려 인증하는 흐름.
