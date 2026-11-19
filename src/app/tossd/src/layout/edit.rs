@@ -85,7 +85,7 @@ fn relocate<T>(pages: &mut [Page], items: fn(&mut Page) -> &mut Vec<T>, found: i
 
 /// 입력된 설정에서 해당 위젯 종류가 정의한 키만 추출하고 정제한다(`catalog`의 `settings` 기준). 알 수 없는 키나 잘못된 값은 버린다.
 ///   metrics      메트릭 ID 목록(`metric_ids`: 빈 값, 길이 초과, 중복 제외 후 최대 개수까지)
-///   text, color  앞뒤 공백 제거 후 길이 초과 또는 제어 문자가 있으면 빈 문자열로 처리
+///   text, color, light  앞뒤 공백 제거 후 길이 초과 또는 제어 문자가 있으면 빈 문자열로 처리
 ///   url          앞뒤 공백 제거 후 웹페이지 주소(`web_url`)가 아니면 버림
 ///   그 외        문자열 그대로 유지하되 길이 초과 또는 제어 문자가 있으면 버림
 /// 필수 항목이 빠졌거나 비어 있으면 오류를 반환한다.
@@ -96,7 +96,7 @@ fn pick_settings(info: &KindInfo, given: &Map<String, Value>) -> Result<Map<Stri
         let Some(value) = given.get(s.key) else { continue };
         let value = match s.kind {
             "metrics" => Some(Value::Array(metric_ids(value, s.max as usize).into_iter().map(Value::String).collect())),
-            "text" | "color" => {
+            "text" | "color" | "light" => {
                 let max = if s.kind == "text" { LABEL_MAX } else { COLOR_MAX };
                 let text = value.as_str().map(str::trim).filter(|t| t.chars().count() <= max && clean(t)).unwrap_or_default();
                 Some(Value::String(text.to_string()))

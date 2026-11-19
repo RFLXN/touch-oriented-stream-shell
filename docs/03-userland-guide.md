@@ -656,6 +656,7 @@ UI와 데몬을 합친 프로그램 전체는 "스트림덱 앱"으로 부른다
 
 - **명령 위젯 4종은 PC에 등록된 명령 1개를 가리킨다.** 실행 내용, 단계/범위, 현재 상태는 모두 PC가 관리한다. 덱은 위젯 추가 시 골라 매핑만 한다([04-host-link.md](04-host-link.md) 4.6절 "명령").
 - 상태가 없는 실행 버튼(`command.run`)에는 인디케이터가 없고, 온/오프 상태가 있는 스위치에는 있다. 노브는 라벨 아래에 현재 값을 표시한다.
+- 스위치는 추가할 때 인디케이터 색상(`Light`)을 고를 수 있다: `AUTO`(버튼 색상에 맞춤: 빨간 버튼은 빨강, 주황 버튼은 주황, 나머지는 초록), 초록, 주황, 빨강, 파랑. 위젯 설정의 `light`에 저장된다(`Theme.indicatorColors`). 이미 놓은 위젯의 설정은 바꿀 수 없으므로, 색상을 바꾸려면 위젯을 지우고 다시 추가한다.
 - UI 구현은 위젯 종류별로 `src/app/ui/widgets/` 아래 파일이 대응된다: `MediaWidget`, `MeterWidget`(리소스 미터 4종 공용), `CommandWidget`, `CommandSwitchWidget`, `CommandSteppedWidget`, `CommandLinearWidget`(명령 위젯 4종 공통 베이스 `CommandBase`). 종류와 QML 파일 매핑은 `shell/WidgetSlot`의 `sources`에 정의돼 있다.
 - 해당 PC가 미연결이거나 위젯이 쓰는 것을 제공하지 않는 상태(권한 해제, 명령 삭제)에서는 위젯이 비활성화(흐림)돼 눌리지 않는다. 명령 위젯이 가리키는 명령의 종류가 위젯과 어긋난 경우에도 비활성화된다(버튼은 `run`, 스위치는 `switch`, 노브는 `stepped`·`linear`).
 - **웹페이지 버튼은 그 PC가 `web.open` 권한을 허용했을 때만 눌린다**(기본은 꺼짐. [04-host-link.md](04-host-link.md) 4.5절). 주소는 위젯 설정에 저장되며 데몬이 `http://`, `https://` 주소만 받는다(공백·제어 문자 없이 512바이트 이하). PC도 같은 검사를 다시 한다.
@@ -763,7 +764,7 @@ UI와 데몬을 합친 프로그램 전체는 "스트림덱 앱"으로 부른다
 | 방향 | 메시지 | 의미 |
 |---|---|---|
 | 데몬 → UI | `hello` | 접속 직후 1회. 데몬 버전 |
-| 데몬 → UI | `catalog` | 접속 직후 1회. 추가 가능한 앱과 앱별 위젯 종류(배치 형태 `form`: 페이지용 `widget` vs 랙 슬롯용 `button`, 크기, 설정 항목과 타입 `host`·`command`·`metrics`·`text`·`color`. `host`에 `own`이 있으면 덱 자신 선택 가능, `command`에는 선택 가능한 명령 종류 `filter`, `metrics`에는 최대 개수 `max` 포함) |
+| 데몬 → UI | `catalog` | 접속 직후 1회. 추가 가능한 앱과 앱별 위젯 종류(배치 형태 `form`: 페이지용 `widget` vs 랙 슬롯용 `button`, 크기, 설정 항목과 타입 `host`·`command`·`metrics`·`text`·`url`·`color`·`light`. `host`에 `own`이 있으면 덱 자신 선택 가능, `command`에는 선택 가능한 명령 종류 `filter`, `metrics`에는 최대 개수 `max` 포함) |
 | 데몬 → UI | `layout` | 레이아웃 상태. 접속 직후 및 변경 시마다 전송. 그리드 크기(`cols`×`rows`)와 페이지별 랙 목록(라벨, 타일 좌표·크기, 내부 버튼 위젯들) 및 복합 위젯 목록. 위젯마다 종류(`kind`), 타일 좌표·크기, 라벨, 버튼 색, 위젯 설정(`settings`) 포함 |
 | UI → 데몬 | `layout_move`, `layout_resize`, `layout_rename`, `layout_add`, `layout_put`, `layout_remove`, `layout_tidy`, `layout_reset` | 레이아웃 편집 명령(편집 모드): 이동, 랙 크기 조절, 랙 이름 변경, 페이지에 추가, 랙 슬롯에 버튼 추가, 삭제, 빈 페이지 정리, 기본 레이아웃 복구. 데몬은 유효성 검증 통과 시에만 저장하고 새 `layout`을 브로드캐스트한다. 거절되거나 잘못된 `layout_*` 메시지 수신 시 현재 `layout`을 재전송해 동기화한다 |
 | UI → 데몬 | `action` | 호스트 액션 실행 요청 (`host`, `name`, `args`). `host`가 비어 있으면 연결된 첫 호스트로 라우팅된다. `widget`에 위젯 ID를 넘기면 실행 결과가 `result`로 돌아온다. 전송 불가 시(대상 호스트 미연결) 즉시 실패(`no_host`) 반환 |

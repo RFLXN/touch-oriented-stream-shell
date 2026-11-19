@@ -50,6 +50,7 @@ pub struct SettingInfo {
     ///   text     문자열(라벨)
     ///   url      웹페이지 주소(`http://` 또는 `https://`. `layout`의 `web_url`)
     ///   color    버튼 색상 이름(UI `Theme.buttonColors`)
+    ///   light    인디케이터 색상 이름(UI `Theme.indicatorColors`). 비우면 버튼 색상에 맞춰 정한다(`Theme.indicatorFor`)
     #[serde(rename = "type")]
     pub kind: &'static str,
     /// 필수 입력 여부
@@ -78,14 +79,17 @@ fn monitor_kind(kind: Kind, title: &'static str, about: &'static str, size: (u32
 }
 
 /// 명령 위젯 종류 생성 헬퍼(`command` 앱). 4가지 모두 랙 1칸 크기이며 설정 구조는 같고(`host`, `command`, `label`, `color`)
-/// 필터링할 명령 종류(`filter`)만 다르다.
+/// 필터링할 명령 종류(`filter`)만 다르다. 인디케이터가 있는 스위치만 인디케이터 색상(`light`)을 더 고른다.
 fn command_kind(kind: Kind, title: &'static str, about: &'static str, filter: &'static str, pick: &'static str) -> KindInfo {
-    let settings = vec![
+    let mut settings = vec![
         SettingInfo::new("host", "PC", "The PC that runs the command", "host", true),
         SettingInfo { filter, ..SettingInfo::new("command", "Command", pick, "command", true) },
         SettingInfo::new("label", "Label", "Printed under it", "text", false),
         SettingInfo::new("color", "Color", "", "color", false),
     ];
+    if kind == Kind::CommandSwitch {
+        settings.push(SettingInfo::new("light", "Light", "Indicator color when on. Auto follows the button color", "light", false));
+    }
     KindInfo::new(kind, title, about, (1, 1), "", settings)
 }
 

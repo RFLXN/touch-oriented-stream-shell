@@ -272,6 +272,18 @@ fn command_buttons_go_into_rack_cells() {
     assert!(widget_of(&l, 3).is_some());
 }
 
+/// 스위치만 인디케이터 색상(`light`)을 설정에 남긴다. 다른 명령 위젯에서는 버린다.
+#[test]
+fn only_switches_keep_an_indicator_color() {
+    let mut l = default_layout();
+    l.edit(&Edit::Add { what: "rack".into(), page: 0, settings: Map::new() }).unwrap();
+    let put = |x: u32, what: &str| Edit::Put { rack: 1, x, y: 0, what: what.into(), settings: serde_json::from_str(r#"{"host":"pc1","command":"c1","light":" blue "}"#).unwrap() };
+    l.edit(&put(0, "command.switch")).unwrap();
+    l.edit(&put(1, "command.run")).unwrap();
+    assert_eq!(widget_of(&l, 3).unwrap().settings.get("light"), Some(&Value::String("blue".into())));
+    assert_eq!(widget_of(&l, 4).unwrap().settings.get("light"), None);
+}
+
 /// 자원 미터: 크기에 따라 최대 미터 수가 다르며 대상 호스트(`@deck` 또는 PC)와 메트릭 목록이 필수다.
 /// 현재 배치에서 모니터링 중인 항목(`watched`)을 추출할 수 있다(모니터링 중인 항목만 측정).
 #[test]

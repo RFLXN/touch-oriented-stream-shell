@@ -7,6 +7,7 @@
 // (이 홀드 타이머와 거절 감지는 `widgets/CommandBase`가 처리한다).
 //   - PC가 미연결이거나 해당 스위치를 제공하지 않으면 흐리게 표시되고 눌리지 않는다.
 //   - 액션이 거절되면 인디케이터가 빨간색으로 한 번 점멸한다.
+// 인디케이터 색상은 위젯 설정 `light`(`Theme.indicatorColors`의 이름)를 따르고, 비어 있으면 버튼 색상에 맞춘다(`Theme.indicatorFor`).
 import QtQuick
 import "../kit"
 
@@ -33,7 +34,7 @@ CommandBase {
         color: root.face
         label: root.label
         on: root.ready && root.on
-        indicatorColor: root.rejected ? Theme.indicatorRed : Theme.indicatorFor(root.widget.color)
+        indicatorColor: root.rejected ? Theme.indicatorRed : Theme.indicatorNamed(root.widget.settings ? root.widget.settings.light : "", root.widget.color)
         onTapped: {
             if (!root.ready)
                 return

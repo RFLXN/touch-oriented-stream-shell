@@ -95,6 +95,15 @@ QtObject {
     function indicatorFor(name) {
         return name === "red" ? indicatorRed : name === "orange" ? indicatorAmber : indicatorGreen
     }
+    readonly property var indicatorColors: ({
+        green: indicatorGreen,
+        amber: indicatorAmber,
+        red: indicatorRed,
+        blue: indicatorBlue
+    })
+    function indicatorNamed(light, button) {
+        return indicatorColors[light] || indicatorFor(button)
+    }
 
     readonly property int screenInset: 2
     readonly property int screenRadius: 28

@@ -293,8 +293,10 @@ pub struct Action {
 /// Discord 음성 설정 변경 이벤트
 pub const VOICE: &str = "VOICE_SETTINGS_UPDATE";
 
+/// `mute`는 헤드셋 음소거(`deaf`) 중에도 켜짐으로 읽는다. Discord는 헤드셋 음소거 중에 마이크도 막지만 `mute` 값은 그대로 두기 때문이다.
+/// 헤드셋 음소거 중에 마이크 음소거를 끄면 Discord가 헤드셋 음소거도 함께 푼다.
 pub const ACTIONS: &[Action] = &[
-    Action { id: "mute", title: "마이크 음소거", kind: KIND_SWITCH, feed: VOICE, read: |v| v["mute"].as_bool().map(f64::from), write: |x| ("SET_VOICE_SETTINGS", json!({ "mute": x != 0.0 })) },
+    Action { id: "mute", title: "마이크 음소거", kind: KIND_SWITCH, feed: VOICE, read: |v| Some(f64::from(v["mute"].as_bool()? || v["deaf"].as_bool().unwrap_or(false))), write: |x| ("SET_VOICE_SETTINGS", json!({ "mute": x != 0.0 })) },
     Action { id: "deaf", title: "헤드셋 음소거", kind: KIND_SWITCH, feed: VOICE, read: |v| v["deaf"].as_bool().map(f64::from), write: |x| ("SET_VOICE_SETTINGS", json!({ "deaf": x != 0.0 })) },
 ];
 
@@ -403,6 +405,18 @@ mod tests {
         server.join().unwrap();
         assert!(ipc::Ipc::connect("42", &[dir.join("discord-ipc-9")]).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_mic_reads_as_muted_while_deafened() {
+        let (mute, deaf) = (action("mute").unwrap(), action("deaf").unwrap());
+        let read = |a: &Action, v: Value| (a.read)(&v);
+        assert_eq!(read(mute, json!({ "mute": false, "deaf": true })), Some(1.0));
+        assert_eq!(read(mute, json!({ "mute": true, "deaf": false })), Some(1.0));
+        assert_eq!(read(mute, json!({ "mute": false, "deaf": false })), Some(0.0));
+        assert_eq!(read(mute, json!({})), None);
+        assert_eq!(read(deaf, json!({ "mute": true, "deaf": false })), Some(0.0));
+        assert_eq!((mute.write)(0.0), ("SET_VOICE_SETTINGS", json!({ "mute": false })));
     }
 
     #[test]

@@ -7,6 +7,7 @@
 //   text     텍스트 입력 필드
 //   url      웹페이지 주소 입력 필드(자동 완성 없이 입력. `https://`로 시작한 채 열린다)
 //   color    버튼 색상 선택
+//   light    인디케이터 색상 선택(`AUTO`는 빈 값: 버튼 색상에 맞춘다)
 // 현재 선택 상태는 상위 `panel.chosen`에 보관되며, 여기서는 표시 및 선택 이벤트(`panel.chooseFor`, `panel.toggleMetric`, `panel.choose`)를 전달한다.
 // `leave()`는 텍스트 입력 필드의 포커스와 조합 중인 문자를 정리한다(패널 닫힘 또는 ADD 클릭 시 호출).
 import QtQuick
@@ -139,6 +140,39 @@ SettingsSection {
                     color: Theme.buttonColor(modelData)
                     held: option.chosen[option.modelData.key] === modelData
                     onTapped: option.panel.choose(option.modelData.key, modelData)
+                }
+            }
+        }
+    }
+    Item {
+        visible: option.modelData.type === "light"
+        width: parent.width
+        height: 84
+        Row {
+            anchors { left: parent.left; leftMargin: 16; verticalCenter: parent.verticalCenter }
+            spacing: 10
+            Button {
+                width: 84
+                height: 52
+                text: "AUTO"
+                held: !option.chosen[option.modelData.key]
+                onTapped: option.panel.choose(option.modelData.key, "")
+            }
+            Repeater {
+                model: Object.keys(Theme.indicatorColors)
+                Button {
+                    id: swatch
+                    required property string modelData
+                    width: 84
+                    height: 52
+                    held: option.chosen[option.modelData.key] === modelData
+                    onTapped: option.panel.choose(option.modelData.key, modelData)
+                    Indicator {
+                        anchors.centerIn: parent
+                        size: 14
+                        on: true
+                        color: Theme.indicatorColors[swatch.modelData]
+                    }
                 }
             }
         }

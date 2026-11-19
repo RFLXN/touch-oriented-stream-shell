@@ -338,11 +338,12 @@ toss-connector allow command.run                     # 덱에 실행 권한 부�
 
 | 동작 | 종류 | 켜기/끄기 | 상태 |
 |---|---|---|---|
-| `mute` | `switch` | Discord 마이크 음소거 켜기/끄기(`SET_VOICE_SETTINGS`의 `mute`) | Discord가 보내는 `VOICE_SETTINGS_UPDATE`의 `mute` |
+| `mute` | `switch` | Discord 마이크 음소거 켜기/끄기(`SET_VOICE_SETTINGS`의 `mute`) | Discord가 보내는 `VOICE_SETTINGS_UPDATE`의 `mute`. 헤드셋 음소거(`deaf`) 중이면 켜짐 |
 | `deaf` | `switch` | Discord 헤드셋 음소거 켜기/끄기(`deaf`) | 같은 이벤트의 `deaf` |
 
 - 상태 확인 커맨드를 실행하지 않는다. 커넥터가 Discord 앱에 상주 연결해 변경 이벤트를 구독하고, 그 최신 값을 덱에 보낸다. 그래서 Discord 화면이나 Discord 단축키로 바꾼 상태도 곧바로 덱에 반영된다.
-- Discord의 규칙상 헤드셋 음소거를 켜면 마이크 음소거도 켜지고, 헤드셋 음소거 중에 마이크 음소거를 끄면 헤드셋 음소거도 풀린다. 덱의 표시등은 Discord가 알려 주는 실제 상태를 따른다.
+- 헤드셋 음소거 중에는 Discord가 마이크도 막지만, 이벤트의 `mute` 값은 바꾸지 않는다(2026-11-19 실제 Discord에서 확인). 그래서 마이크 동작은 `mute`나 `deaf` 중 하나라도 켜져 있으면 켜짐으로 읽는다. 덱의 Mic 스위치도 헤드셋 음소거를 켜면 함께 켜짐으로 표시된다.
+- 헤드셋 음소거 중에 마이크 음소거를 끄면 Discord가 헤드셋 음소거도 함께 푼다(실제 Discord에서 확인). 덱에서 켜짐으로 보이는 Mic 스위치를 누르면 둘 다 꺼진다.
 - 상주 연결은 Discord 동작 명령이 등록되어 있고, 그 명령을 쓰는 덱(`command.run` 허용)이 연결되어 있는 동안만 유지한다. 토큰은 연결할 때 덱 금고에서 빌려 인증에만 쓴다(4.15절). Discord 앱이 꺼져 있거나 연결이 끊어지면 상태를 알 수 없음(`null`)으로 보내고, 3초부터 최대 60초 간격으로 다시 연결한다.
 - `toss-connector command set`/`state`는 Discord 동작 명령이면 실행 중인 `toss-connector`의 웹 콘솔 API로 넘긴다(상주 연결이 그 프로세스에 있기 때문이다).
 - 동작 목록은 `src/app/host/src/discord.rs`의 `ACTIONS`다. 새 동작은 이 표에 한 줄(종류, 읽을 이벤트 필드, 보낼 명령)을 더하면 되고, 새 이벤트를 쓰려면 `discord/live.rs`의 `FEEDS`에 (현재 값을 읽는 명령, 구독할 이벤트)를 더한다.
@@ -613,6 +614,7 @@ nix build .#toss-connector -o dist/toss-connector && ./dist/toss-connector/bin/t
 | `programs.toss-connector.extraArgs` | `[ ]` | `toss-connector`에 추가로 전달할 인자. 원문 그대로 전달된다(`%`나 `$`를 systemd가 확장하지 않게 기록됨) |
 
 - **사용자 서비스다**(`systemd --user`의 `toss-connector.service`). 시스템 서비스가 아니다: 미디어 플레이어와 등록된 명령은 로그인한 사용자의 세션에 속한다. 상태와 로그는 `systemctl --user status toss-connector`, `journalctl --user -u toss-connector`로 확인한다. 시스템 사용자(로그인 화면을 띄우는 사용자 등)의 세션에서는 실행되지 않는다(`ConditionUser=!@system`).
+- **`nixos-rebuild switch`로 커넥터가 바뀌면 서비스도 저절로 새 버전으로 다시 뜬다.** 패키지가 바뀌면 유닛 파일의 `ExecStart` 경로가 바뀌므로, NixOS의 `switch-to-configuration`이 바뀐 사용자 유닛으로 보고 옛 서비스를 멈춘 뒤 새 서비스를 시작한다(로그인해 있는 사용자의 `systemd --user`에서). 따로 `systemctl --user restart`를 할 필요가 없다(2026-11-19, NixOS 26.11에서 확인).
 - **비정상 종료 시 3초 뒤 재시작한다. 재시작해도 소용없는 두 경우는 재시작하지 않는다**(`RestartPreventExitStatus=2 3`): 인자 오류로 종료된 경우(종료 코드 2 — `extraArgs`를 잘못 적었을 때)와 이미 실행 중인 인스턴스가 있어 종료된 경우(종료 코드 3 — 아래).
 - **등록된 명령이 프로그램을 찾는 경로**: 서비스 PATH를 로그인 셸과 비슷하게 구성한다 — `/run/wrappers/bin`, 사용자 프로필(`~/.nix-profile`, `/etc/profiles/per-user/<사용자>`), 시스템(`/run/current-system/sw/bin`). 터미널에서 되는 커맨드가 덱에서 안 되면 대개 PATH 문제다: `programs.toss-connector.path`에 해당 패키지를 넣거나 커맨드에 전체 경로를 적는다.
 - **창을 띄우는 명령**은 세션 환경 변수(`WAYLAND_DISPLAY` 등)가 사용자 서비스에 전달돼 있어야 한다. 데스크톱 환경은 이를 전달해 준다. 그래서 기본값이 그래픽 세션 시작 이후(`graphical-session.target`)다.
