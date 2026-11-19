@@ -196,6 +196,8 @@ pub const VAULT_TOKEN: &str = "token";
 
 /// 덱 금고가 다루는 서비스 (HostMsg::Vault의 service)
 pub const SERVICE_DISCORD: &str = "discord";
+/// Spotify: 덱이 직접 Spotify Web API를 쓴다. PC는 키 저장과 승인(브라우저 로그인)만 돕고 토큰을 빌리지 않는다
+pub const SERVICE_SPOTIFY: &str = "spotify";
 
 /// 덱 금고 오류 (DeckMsg::VaultReply의 error). 그 밖의 실패는 사유 문장이 그대로 담긴다.
 /// denied: 덱 사용자가 거절함, busy: 다른 요청을 묻는 중, timeout: 덱 사용자가 답하지 않음,

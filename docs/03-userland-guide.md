@@ -645,7 +645,7 @@ UI와 데몬을 합친 프로그램 전체는 "스트림덱 앱"으로 부른다
 
 | 앱 | 위젯 종류 | 배치 위치 | 설정 항목 | 동작 |
 |---|---|---|---|---|
-| `Media` | `media.player` | 페이지, 4×2 | 대상 PC (미지정 시 연결된 첫 PC) | PC 재생 곡 앨범 아트·메타데이터, 진행 바, 7개 버튼(반복, 이전 곡, 5초 뒤로, 재생·일시정지, 5초 앞으로, 다음 곡, 셔플) |
+| `Media` | `media.player` | 페이지, 4×2 | 대상(`Source`): PC(미지정 시 연결된 첫 PC) 또는 `Spotify` | 재생 곡 앨범 아트·메타데이터, 진행 바, 7개 버튼(반복, 이전 곡, 5초 뒤로, 재생·일시정지, 5초 앞으로, 다음 곡, 셔플). `Spotify`를 고르면 덱이 Spotify 계정을 직접 조회하고 제어한다([04-host-link.md](04-host-link.md) 4.15절 "Spotify") |
 | `Resource monitor` | `monitor.2x1`, `monitor.2x2`, `monitor.4x1`, `monitor.4x2` | 페이지, 이름과 동일한 크기 | 대상 장치(덱 자신 또는 PC), 표시 메트릭(크기별 최대 3·6·6·12개) | 리소스 사용량 미터 (아래 "리소스 미터") |
 | `Command` | `command.run` | 랙 슬롯 | PC, 해당 PC에 등록된 명령, 라벨, 색상 | 버튼: 탭 시 명령 1개 실행 |
 | | `command.switch` | 랙 슬롯 | 위와 동일 | 스위치 버튼: 온/오프 전환. 상태는 PC가 보고 |
@@ -786,6 +786,7 @@ UI와 데몬을 합친 프로그램 전체는 "스트림덱 앱"으로 부른다
 | 데몬 → UI | `vault` | 덱 금고 상태: 서비스별 키 보관 여부(`registered`), 토큰 갱신 가능 여부(`linked`), 금고를 쓰도록 허용한 호스트(`hosts`), 화면에서 허용 여부를 묻는 중인 요청(`asking`. 없으면 `null`). 키 값은 오지 않는다 |
 | UI → 데몬 | `vault_answer`, `vault_revoke`, `vault_forget` | `asking`에 답하기(`allow`), 호스트의 금고 사용 허용 해제(`service`, `host`), 서비스 키와 토큰 삭제(`service`) |
 | 데몬 → UI | `icons` | 웹페이지 아이콘 버튼이 표시할 사이트 아이콘(주소 → `data:` URI). 가져오지 못한 주소는 빠진다. 변경 시 전체 전송 |
+| 데몬 → UI | `spotify` | 덱이 직접 조회하는 Spotify 계정의 재생 상태: 승인 여부(`linked`), 마지막 조회 성공 여부(`live`), 재생 정보(`media`, 형식은 호스트의 것과 같음), 앨범 아트(`art`), 실패 사유(`error`). UI(`DaemonLink`)는 이것을 호스트와 같은 모양(`id: "@spotify"`)으로 바꿔 미디어 위젯에 넘긴다. 그 위젯의 액션은 `host: "@spotify"`로 보내며 덱이 처리한다 |
 | UI → 데몬 | `pair_start`, `pair_stop`, `pair_accept`, `pair_reject`, `host_forget` | 페어링 모드 시작·중지, 수락·거절, 페어링 삭제. `pair_accept`에는 화면에 표시된 검증 코드(`code`)를 함께 실어 보내며 현재 후보 코드와 다르면 무시한다(탭하는 순간 후보가 다른 PC로 바뀔 수 있는 경쟁 상태 방지). `pair_stop`과 `pair_reject`는 대기 중인 PC에 `rejected` 알림 전송 |
 
 호스트(PC) 측 프로토콜은 [04-host-link.md](04-host-link.md) 4.6절에 정리돼 있다.
@@ -971,6 +972,7 @@ UI (`src/app/ui/`):
 | `hosts/store.rs` | 페어링 호스트 목록(`hosts.json`)과 덱 키(`key`) 파일 저장 | 수정 불필요 |
 | `hosts/vault.rs` | 덱 금고: 외부 연동 키 암호화 보관(`vault.json`, `vault.key`), 금고를 쓸 수 있는 호스트 관리와 허용 질문, 토큰 발급·갱신과 대여([04-host-link.md](04-host-link.md) 4.15절) | 새 서비스를 더할 때 `SERVICES` |
 | `icons.rs` | 웹페이지 아이콘 버튼의 사이트 아이콘 가져오기(큰 것부터 시도)와 `icons/` 보관 | 수정 불필요 |
+| `spotify.rs` | Spotify 계정 조회와 재생 제어(Spotify Web API. 토큰은 덱 금고에서 얻음). Spotify 미디어 위젯이 배치에 있을 때만 조회 | 수정 불필요 |
 | `sys.rs` | 시스템 상태 수집(상단바 및 정보 시트용: 호스트명, IP, 인터페이스 링크 상태). 리소스 사용량은 `src/app/meter`(PC 공용 크레이트)가 측정하며 `state.rs`가 1초마다 호출 | 수정 불필요 |
 | `device.rs` | 덱 하드웨어 제어: 화면 밝기, 절전, 전원 종료, SSH 토글 | 수정 불필요 |
 | `wifi.rs` | Wi-Fi 상태 및 접속 관리 (`wpa_supplicant` 제어 소켓 연동) | 수정 불필요 |

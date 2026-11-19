@@ -21,6 +21,7 @@ mod icons;
 mod layout;
 mod persist;
 mod server;
+mod spotify;
 mod state;
 mod sys;
 mod ui_proto;

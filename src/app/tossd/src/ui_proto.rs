@@ -34,6 +34,10 @@
 //!   {"type":"icons","icons":{"https://example.com/":"data:image/png;base64,.."}}
 //!                                                            웹페이지 아이콘 버튼(`web.icon`)이 표시할 사이트 아이콘(주소 -> `data:` URI. 가져오지 못한 주소는 생략).
 //!                                                            덱이 직접 가져와 보관한다(`icons.rs`). 변경 시 전체 전송
+//!   {"type":"spotify","linked":true,"live":true,"media":{..}|null,"art":{"id":"sp-..","mime":"image/jpeg","data":"<base64>"}|null,"error":""}
+//!                                                            덱이 직접 조회하는 Spotify 계정의 재생 상태(`spotify.rs`의 `SpotifyState`). `media` 형식은 호스트의 재생 정보와 같다.
+//!                                                            배치에 Spotify를 대상으로 고른 미디어 위젯이 있을 때만 조회한다. 그 위젯의 액션은
+//!                                                            `{"type":"action","host":"@spotify",..}`로 보내며 덱이 Spotify Web API로 처리한다
 //! 클라이언트 -> 데몬
 //!   {"type":"brightness","value":120,"keep":true}            화면 밝기 변경. `keep`이 true이면 영구 저장해 다음 부팅 시에도 복원한다
 //!                                                            (드래그 중에는 `keep` 없이 보내고, 손을 뗄 때 `keep: true`로 보낸다).
@@ -105,6 +109,7 @@ use serde::{Deserialize, Serialize};
 use crate::device::DeviceState;
 use crate::hosts::{HostsState, Values, VaultState};
 use crate::icons::IconMap;
+use crate::spotify::SpotifyState;
 use crate::layout::{AppInfo, Edit, Layout, Target};
 use crate::state::{MeterInfos, MeterValues};
 use crate::sys::SysState;
@@ -126,6 +131,7 @@ pub enum ServerMsg<'a> {
     MeterValues { hosts: &'a MeterValues },
     Vault(&'a VaultState),
     Icons { icons: &'a IconMap },
+    Spotify(&'a SpotifyState),
 }
 
 #[derive(Deserialize)]

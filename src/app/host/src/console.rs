@@ -1,6 +1,7 @@
 //! 웹 콘솔: 브라우저에서 호스트의 toss-connector를 관리하는 정적 웹 UI와 로컬 HTTP API.
 //! CLI(`toss-connector allow`, `command add` 등) 기능을 웹 UI로 제공한다(덱별 권한, 명령 관리, 페어링, 절전/깨우기, 외부 연동).
-//! `toss-connector discord` CLI도 이 API를 호출한다(덱 금고 요청은 실행 중인 데몬의 덱 세션을 거쳐야 하기 때문).
+//! `toss-connector discord`, `spotify` CLI도 이 API를 호출한다(덱 금고 요청은 실행 중인 데몬의 덱 세션을 거쳐야 하기 때문).
+//! 예외로 `GET /spotify/callback`은 Spotify 로그인 뒤 브라우저가 돌아오는 주소라 토큰 없이 받는다. 일회용 `state`로 확인한다(`spotify.rs`).
 //!
 //! 정적 파일(src/app/host/console/의 index.html, app.js, style.css; 빌드 과정 없음)로 구성된다.
 //!   - 기본: 실행 중인 toss-connector가 http://127.0.0.1:<포트>/ 에서 직접 서빙(`toss-connector console`로 열기).
@@ -39,6 +40,8 @@
 //!   POST   /api/vault/<서비스>/put         `{"client_id", "client_secret", "redirect_uri"}` 서비스 키를 덱 금고에 저장(이 PC에는 남기지 않음)
 //!   POST   /api/vault/<서비스>/forget      덱 금고에서 서비스 키와 토큰 삭제
 //!   POST   /api/discord/link | check       Discord 연결(승인) / 확인 시작 (진행 상태는 state.discord 참고) / POST /api/discord/clear 결과 지우기
+//!   POST   /api/spotify/link               Spotify 로그인 시작 → `{"url": "<브라우저로 열 Spotify 승인 주소>"}` (진행 상태는 state.spotify)
+//!   POST   /api/spotify/clear              Spotify 로그인 결과 지우기
 //!   (금고 요청은 덱이 화면에서 허용 여부를 묻는 동안 최대 1분쯤 응답이 늦어질 수 있다. 연결된 덱의 금고 상태는 state.vault)
 //!
 //! 설정은 console.json에 저장한다: `{"port": 7880, "origins": ["https://..."]}`.
@@ -220,7 +223,7 @@ pub fn spawn(dir: PathBuf, managed: Option<PathBuf>) {
 /// 연결 수락 루프 (요청별 스레드 생성)
 pub fn serve(listener: TcpListener, dir: PathBuf, managed: Option<PathBuf>) {
     let port = listener.local_addr().map(|a| a.port()).unwrap_or(CONSOLE_PORT);
-    let ctx = Arc::new(Ctx { dir, managed, port, pairing: Mutex::new(Progress::default()), discord: Mutex::new(Job::default()) });
+    let ctx = Arc::new(Ctx { dir, managed, port, pairing: Mutex::new(Progress::default()), discord: Mutex::new(Job::default()), spotify: Mutex::new(crate::spotify::Login::default()) });
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
         let ctx = ctx.clone();
@@ -237,12 +240,15 @@ struct Ctx {
     port: u16,
     pairing: Mutex<Progress>,
     discord: Mutex<Job>,
+    spotify: Mutex<crate::spotify::Login>,
 }
 
 struct Request {
     method: String,
     /// 쿼리 스트링을 제외한 경로
     path: String,
+    /// `?` 뒤의 쿼리 스트링(없으면 빈 문자열)
+    query: String,
     headers: HashMap<String, String>,
     body: Vec<u8>,
 }
@@ -268,7 +274,7 @@ fn read_request(stream: &mut TcpStream) -> io::Result<Request> {
     let mut lines = head.split("\r\n");
     let mut first = lines.next().unwrap_or_default().split(' ');
     let (method, target) = (first.next().unwrap_or_default().to_string(), first.next().unwrap_or_default());
-    let path = target.split('?').next().unwrap_or_default().to_string();
+    let (path, query) = target.split_once('?').map_or((target.to_string(), String::new()), |(p, q)| (p.to_string(), q.to_string()));
     let headers: HashMap<String, String> = lines.filter_map(|l| l.split_once(':')).map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string())).collect();
     let len: usize = headers.get("content-length").and_then(|v| v.parse().ok()).unwrap_or(0);
     if len > BODY_MAX {
@@ -283,7 +289,7 @@ fn read_request(stream: &mut TcpStream) -> io::Result<Request> {
         body.extend_from_slice(&chunk[..n]);
     }
     body.truncate(len);
-    Ok(Request { method, path, headers, body })
+    Ok(Request { method, path, query, headers, body })
 }
 
 struct Response {
@@ -346,6 +352,10 @@ fn route(req: &Request, ctx: &Arc<Ctx>, cfg: &Config, origin: Option<&str>) -> R
             ("GET", "/" | "/index.html") => Response::file("text/html; charset=utf-8", INDEX_HTML),
             ("GET", "/app.js") => Response::file("text/javascript; charset=utf-8", APP_JS),
             ("GET", "/style.css") => Response::file("text/css; charset=utf-8", STYLE_CSS),
+            ("GET", crate::spotify::CALLBACK_PATH) => {
+                let (status, text) = crate::spotify::callback(&ctx.spotify, &req.query);
+                Response { status, kind: "text/html; charset=utf-8", body: crate::spotify::page(&text).into_bytes() }
+            }
             _ => Response::error(404, "존재하지 않는 경로입니다"),
         };
     }
@@ -528,6 +538,14 @@ fn api(req: &Request, ctx: &Arc<Ctx>, cfg: &Config) -> ApiResult {
             discord_start(ctx, if *kind == "link" { "link" } else { "check" })?;
             done()
         }
+        ("POST", ["spotify", "link"]) => {
+            let url = crate::spotify::start(&ctx.spotify, ctx.port).map_err(|e| (409, e))?;
+            Ok(json!({ "url": url }))
+        }
+        ("POST", ["spotify", "clear"]) => {
+            ctx.spotify.lock().unwrap().clear();
+            done()
+        }
         ("POST", ["discord", "clear"]) => {
             let mut job = ctx.discord.lock().unwrap();
             if !job.busy() {
@@ -578,6 +596,8 @@ fn state(store: &Store, cmds: &Commands, ctx: &Ctx, cfg: &Config) -> Value {
         "pairing": ctx.pairing.lock().unwrap().shown(),
         "vault": crate::vault::state().map(|(deck, services)| json!({ "deck": deck, "services": services })),
         "discord": ctx.discord.lock().unwrap().shown(),
+        "spotify": ctx.spotify.lock().unwrap().shown(),
+        "spotify_callback": crate::spotify::callback_uri(ctx.port),
         "discord_live": live,
         "discord_actions": crate::discord::ACTIONS.iter().map(|a| json!({ "id": a.id, "title": a.title, "kind": a.kind })).collect::<Vec<_>>(),
         "origins": cfg.origins,
@@ -839,6 +859,59 @@ pub fn discord_cli(store: &Store, sub: Option<&str>) {
             println!("덱에서 Discord 키와 토큰을 삭제했습니다.");
         }
         Some(other) => crate::usage(&format!("알 수 없는 명령: discord {other}")),
+    }
+}
+
+/// `toss-connector spotify ...`: 실행 중인 toss-connector의 로컬 API로 덱 금고에 Spotify 앱 키를 저장하고 브라우저 로그인으로 연결한다.
+pub fn spotify_cli(store: &Store, sub: Option<&str>) {
+    let dir = store.dir();
+    let call = |method: &str, path: &str, body: Option<&Value>| local_api(dir, method, path, body).unwrap_or_else(|e| crate::fail(&e));
+    let callback = crate::spotify::callback_uri(config(dir).port);
+    match sub {
+        None | Some("status") => {
+            let st = call("GET", "/api/state", None);
+            let deck = st["decks"].as_array().and_then(|d| d.iter().find(|d| d["connected"] == true)).map(|d| d["name"].as_str().unwrap_or_default().to_string());
+            let Some(deck) = deck else { return println!("연결된 덱이 없습니다.") };
+            let Some(s) = st["vault"]["services"].as_array().and_then(|l| l.iter().find(|s| s["id"] == toss_proto::SERVICE_SPOTIFY)) else {
+                return println!("덱 {deck}이(가) Spotify 연동을 지원하지 않습니다 (덱 이미지를 새로 플래싱하세요).");
+            };
+            let yes = |k: &str| s[k] == true;
+            println!("덱: {deck}");
+            println!("  Spotify 키      {}", if yes("registered") { "저장됨" } else { "없음 (toss-connector spotify set)" });
+            println!("  연결(로그인)    {}", if yes("linked") { "됨 (덱이 재생 정보를 직접 가져옵니다)" } else { "안 됨 (toss-connector spotify link)" });
+        }
+        Some("set") => {
+            println!("Spotify 개발자 대시보드(https://developer.spotify.com/dashboard)의 앱 > Settings에서 값을 확인하세요.");
+            println!("같은 화면의 Redirect URIs에 {callback} 를 등록해야 합니다.");
+            let client_id = read_line("Client ID: ");
+            let client_secret = read_hidden("Client Secret (입력이 표시되지 않음): ");
+            println!("덱에 저장하는 중... (이 PC가 처음이면 덱 화면에서 ALLOW를 누르세요)");
+            call("POST", "/api/vault/spotify/put", Some(&json!({ "client_id": client_id, "client_secret": client_secret, "redirect_uri": callback })));
+            println!("덱에 저장했습니다. 이 PC에는 남기지 않았습니다. 이어서: toss-connector spotify link");
+        }
+        Some("link") => {
+            println!("덱의 응답을 기다리는 중... (이 PC가 처음이면 덱 화면에서 ALLOW를 누르세요)");
+            let url = call("POST", "/api/spotify/link", None)["url"].as_str().unwrap_or_default().to_string();
+            println!("브라우저에서 Spotify에 로그인하고 승인하세요:\n  {url}");
+            if let Err(e) = crate::web::open(&url) {
+                println!("(브라우저를 열 수 없습니다: {e}. 위 주소를 직접 여세요)");
+            }
+            loop {
+                let job = call("GET", "/api/state", None)["spotify"].clone();
+                match job["phase"].as_str().unwrap_or("idle") {
+                    "done" => return println!("Spotify 연결을 마쳤습니다. 덱이 재생 정보를 직접 가져옵니다."),
+                    "failed" => crate::fail(job["error"].as_str().unwrap_or("실패했습니다")),
+                    "idle" => crate::fail("로그인 진행 상태가 사라졌습니다. 다시 시도하세요"),
+                    _ => {}
+                }
+                thread::sleep(Duration::from_millis(700));
+            }
+        }
+        Some("forget") => {
+            call("POST", "/api/vault/spotify/forget", None);
+            println!("덱에서 Spotify 키와 토큰을 삭제했습니다.");
+        }
+        Some(other) => crate::usage(&format!("알 수 없는 명령: spotify {other}")),
     }
 }
 

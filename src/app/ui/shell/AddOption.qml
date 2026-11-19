@@ -1,7 +1,7 @@
 // 위젯 추가 패널(`shell/AddPanel`)의 개별 설정 섹션: 데몬 `catalog`가 정의한 위젯 설정(`modelData`) 1건을 선택하는 UI.
 // 설정 타입(`modelData.type`)에 따라 입력 형태가 달라진다:
 //   host     페어링된 PC 중 하나 선택(필수가 아니면 `"Any connected PC"` 포함).
-//            `own`이 true면 덱 자신(`"This deck"`, 값 `"@deck"`)도 선택 가능.
+//            `own`이 true면 덱 자신(`"This deck"`, 값 `"@deck"`)도, `spotify`가 true면 덱이 직접 조회하는 Spotify 계정(`"@spotify"`)도 선택 가능.
 //   metrics  위에서 선택한 호스트(덱 또는 PC)의 측정 가능 메트릭 중 복수 선택(`max`개까지). 탭한 순서대로 추가되며 다시 탭하면 해제된다.
 //   command  위에서 선택한 PC에 등록된 명령 중 하나 선택(해당 호스트 목록 기준). `filter`가 있으면 해당 타입의 명령만 표시.
 //   text     텍스트 입력 필드
@@ -27,6 +27,7 @@ SettingsSection {
         if (modelData.type === "host") {
             const any = (modelData.required ? [] : [{ value: "", title: "Any connected PC", note: modelData.about }])
                 .concat(modelData.own ? [{ value: "@deck", title: "This deck", note: panel.deckName }] : [])
+                .concat(modelData.spotify ? [{ value: "@spotify", title: "Spotify", note: "The Spotify account linked to this deck" }] : [])
             return any.concat(panel.hosts.map((h) => ({ value: h.id, title: h.name, note: h.connected ? "Connected" : "Not connected" })))
         }
         if (modelData.type === "command")

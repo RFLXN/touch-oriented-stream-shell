@@ -59,13 +59,15 @@ pub struct SettingInfo {
     pub filter: &'static str,
     /// `type`이 `host`일 때 덱 자신(`SELF_HOST`)도 선택지에 포함할지 여부
     pub own: bool,
+    /// `type`이 `host`일 때 덱이 직접 조회하는 Spotify 계정(`spotify::SOURCE`, `"@spotify"`)도 선택지에 포함할지 여부
+    pub spotify: bool,
     /// `type`이 `metrics`일 때 최대 선택 가능 개수(1부터 `max`개)
     pub max: u32,
 }
 
 impl SettingInfo {
     fn new(key: &'static str, title: &'static str, about: &'static str, kind: &'static str, required: bool) -> Self {
-        Self { key, title, about, kind, required, filter: "", own: false, max: 0 }
+        Self { key, title, about, kind, required, filter: "", own: false, spotify: false, max: 0 }
     }
 }
 
@@ -109,14 +111,14 @@ pub fn catalog() -> Vec<AppInfo> {
         AppInfo {
             id: "media",
             title: "Media",
-            about: "What is playing on a PC",
+            about: "What is playing on a PC or a Spotify account",
             widgets: vec![KindInfo::new(
                 Kind::MediaPlayer,
                 "Player",
                 "Cover, track and playback keys",
                 (4, 2),
                 "MEDIA",
-                vec![SettingInfo::new("host", "PC", "Which paired PC this widget shows and controls", "host", false)],
+                vec![SettingInfo { spotify: true, ..SettingInfo::new("host", "Source", "A paired PC, or the Spotify account linked to this deck", "host", false) }],
             )],
         },
         AppInfo {

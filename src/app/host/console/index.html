@@ -86,6 +86,30 @@
             저장한 뒤 <b>Discord 연결</b>을 누르면 이 PC의 Discord 앱에 승인 창이 뜹니다.</p>
         </form>
       </div>
+      <div class="box" id="spotify">
+        <div class="row">
+          <div class="text">
+            <div class="title">Spotify <span id="spotify-tags"></span></div>
+            <div class="note">덱이 이 계정의 재생 정보를 직접 가져오고 재생을 제어합니다. 이 PC는 로그인만 돕고 토큰을 받지 않습니다.</div>
+          </div>
+          <div class="keys">
+            <button id="spotify-link" class="key accent">Spotify 연결</button>
+            <button id="spotify-forget" class="key">키 삭제</button>
+          </div>
+        </div>
+        <div id="spotify-progress" class="sub" hidden></div>
+        <form id="spotify-form" class="sub">
+          <div class="triple">
+            <label class="field"><span>Client ID</span><input id="s-id" type="text" spellcheck="false" class="mono" autocomplete="off"></label>
+            <label class="field"><span>Client Secret <i>— 덱으로 보내기만 합니다</i></span><input id="s-secret" type="password" spellcheck="false" class="mono" autocomplete="off"></label>
+            <label class="field"><span>Redirect URI <i>— 이 콘솔의 주소로 고정</i></span><input id="s-redirect" type="text" spellcheck="false" class="mono" readonly></label>
+          </div>
+          <div class="actions"><button type="submit" id="s-save" class="key">덱에 저장</button></div>
+          <p class="note">Spotify 개발자 대시보드(<code>https://developer.spotify.com/dashboard</code>)에서 앱을 만들고, 앱 설정의 Redirect URIs에 위 주소를 등록한 뒤 Client ID와 Client Secret을 입력하세요.
+            개발 모드 앱은 앱을 만든 계정에 Spotify Premium이 있어야 동작하고, 재생 제어도 Premium 계정에서만 됩니다.
+            저장한 뒤 <b>Spotify 연결</b>을 누르면 브라우저에서 Spotify 로그인과 승인 화면이 열립니다. 덱의 미디어 위젯에서 대상(Source)을 Spotify로 고르면 표시됩니다.</p>
+        </form>
+      </div>
     </section>
 
     <section id="about-section" class="panel" hidden>

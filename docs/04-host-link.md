@@ -543,6 +543,10 @@ nix build .#toss-connector -o dist/toss-connector && ./dist/toss-connector/bin/t
 | `toss-connector discord link` | Discord 앱에서 승인을 받아 덱이 토큰을 발급받게 한다(처음 한 번) |
 | `toss-connector discord check` | 덱에서 토큰을 빌려 Discord 앱에 인증해 본다 |
 | `toss-connector discord forget` | 덱 금고에서 Discord 키와 토큰 삭제 |
+| `toss-connector spotify` | Spotify 연동 상태 조회: 덱에 키가 있는지, 연결(로그인)했는지(4.15절 "Spotify") |
+| `toss-connector spotify set` | Spotify 앱 키(Client ID, Client Secret)를 입력받아 덱 금고에 저장. Redirect URI는 콘솔의 콜백 주소로 정해진다 |
+| `toss-connector spotify link` | 브라우저로 Spotify에 로그인해 덱이 토큰을 발급받게 한다(처음 한 번). 승인 주소를 출력하고 브라우저로 연다 |
+| `toss-connector spotify forget` | 덱 금고에서 Spotify 키와 토큰 삭제 |
 | `--config <디렉터리>` | 키와 설정 파일을 저장할 경로 |
 | `--no-console` | 웹 콘솔 비활성화 (인자 없이 실행할 때만 사용) |
 
@@ -570,6 +574,7 @@ nix build .#toss-connector -o dist/toss-connector && ./dist/toss-connector/bin/t
 | `src/console.rs` | 웹 콘솔: 정적 파일을 서빙하고 API를 받는 작은 HTTP 서버, 토큰과 Origin 검증, 콘솔에서 진행하는 페어링과 Discord 연결. `discord` CLI도 이 API를 호출한다 |
 | `src/vault.rs` | 덱 금고 요청 중계: 웹 콘솔과 CLI의 요청을 지금 연결된 덱 세션으로 보내고 응답을 기다린다. 덱이 알려 준 금고 상태 기록 |
 | `src/discord.rs` | Discord 앱의 로컬 RPC(IPC 소켓) 클라이언트, 연결(`link`)·확인(`check`) 절차, 명령으로 쓸 수 있는 Discord 동작 목록(`ACTIONS`) |
+| `src/spotify.rs` | Spotify 로그인 돕기: 덱에서 받은 공개 값으로 승인 주소를 만들고, 브라우저가 돌아온 콜백의 `state`를 확인해 승인 코드를 덱에 넘긴다 |
 | `src/discord/live.rs` | Discord 상주 연결: 쓰는 곳이 있는 동안 연결을 유지하고(재연결 포함) 구독한 이벤트의 최신 값을 기억한다. Discord 동작 명령이 이 연결로 값을 쓰고 읽는다 |
 | `src/web.rs` | 웹페이지 열기(`web.open`): 주소 검증과 `xdg-open` 실행 |
 | `console/` | 웹 콘솔의 프론트엔드(정적 파일 3개). 빌드 시 바이너리에 내장 |
@@ -710,6 +715,8 @@ toss-connector console         # 브라우저로 열기 (토큰 자동 첨부)
 | `POST /api/pair`, `/api/pair/confirm`, `/api/pair/cancel` | 페어링 시작(`{"addr": …}`), 검증 코드 확인, 취소. 진행 상태는 `/api/state`의 `pairing`으로 확인 |
 | `POST /api/vault/<서비스>/put`, `forget` | 덱 금고에 서비스 키 저장(`{"client_id", "client_secret", "redirect_uri"}`), 삭제. 덱이 화면에서 허용 여부를 묻는 동안 최대 1분쯤 응답이 늦어진다. 연결된 덱의 금고 상태는 `/api/state`의 `vault` |
 | `POST /api/discord/link`, `check`, `clear` | Discord 연결(승인), 확인 시작, 결과 지우기. 진행 상태는 `/api/state`의 `discord`(`phase`: `deck`, `discord`, `done`, `failed`) |
+| `POST /api/spotify/link`, `clear` | Spotify 로그인 시작(`{"url"}`: 브라우저로 열 승인 주소), 결과 지우기. 진행 상태는 `/api/state`의 `spotify`(`phase`: `browser`, `deck`, `done`, `failed`), 콜백 주소는 `spotify_callback` |
+| `GET /spotify/callback` | Spotify 로그인 뒤 브라우저가 돌아오는 주소. 토큰 대신 일회용 `state`로 확인하고 결과를 HTML로 보여 준다 |
 
 실패 시 `{"error": "사유"}`와 함께 4xx/5xx 상태 코드를 반환한다: 토큰 불일치 401, Host/Origin 검증 실패 403, 대상 덱/명령 없음 404, 요청 형식 오류 400, Nix 관리형 설정 충돌 409, 파일 I/O 또는 커맨드 실행 실패 500. `set`은 커맨드 실행이 실패로 끝나도 500을 반환한다. 정본은 `src/app/host/src/console.rs` 상단 주석에 있다.
 
@@ -829,7 +836,7 @@ toss-connector console         # 브라우저로 열기 (토큰 자동 첨부)
 | 호스트 페어링 UI | 웹 콘솔에서 검증 코드 확인 후 수락, 또는 터미널 `y` 입력 | 페어링 요청 시 데스크톱 알림 |
 | 자동 실행 | NixOS 모듈(`programs.toss-connector.enable`)이 systemd 사용자 서비스로 등록해 로그인 시 자동 실행 | 타 리눅스 배포판(유닛 파일 수동 배치), Windows, macOS |
 | 절전 | 덱 설정 또는 `toss-connector sleep`으로 진입, `toss-connector wake`로 웨이크업(Wi-Fi 매직 패킷) | 이더넷 웨이크업(안 됨), 터치 웨이크업, 깊은 절전 ([01-findings.md](01-findings.md)). 웨이크업 대상이 해당 덱 키가 맞는지 검증(현재 `wake`는 알려진 덱 IP 중 아무나 접속을 받으면 깨어난 것으로 간주) |
-| 외부 연동 | 덱 금고에 Discord 앱 키를 보관하고, 덱이 토큰을 발급·갱신해 PC에 빌려줌(4.15절). Discord 마이크·헤드셋 음소거 명령(상태는 Discord 이벤트로 반영, 4.6절) | 그 밖의 Discord 기능(입출력 음량, 음성 채널 등). 덱이 인터넷에 연결되지 않았을 때 PC를 거쳐 토큰 주소로 중계 |
+| 외부 연동 | 덱 금고에 Discord 앱 키를 보관하고, 덱이 토큰을 발급·갱신해 PC에 빌려줌(4.15절). Discord 마이크·헤드셋 음소거 명령(상태는 Discord 이벤트로 반영, 4.6절). Spotify 계정의 재생 정보와 제어를 덱이 직접 처리(로그인만 PC 브라우저, 4.15절) | 그 밖의 Discord 기능(입출력 음량, 음성 채널 등). 덱이 인터넷에 연결되지 않았을 때 PC를 거쳐 토큰 주소로 중계 |
 | 블루투스 | 미지원 | 추후 검토 |
 
 **설계 확정 사항 (2026-11-17)**
@@ -903,18 +910,18 @@ toss-connector console         # 브라우저로 열기 (토큰 자동 첨부)
 
 ## 4.15 덱 금고: 외부 연동 키 보관과 토큰 대여
 
-Discord처럼 외부 서비스와 연동하는 기능에 필요한 키를 덱에 보관한다. PC가 바뀌어도 같은 키를 다시 입력하지 않고 쓰기 위해서다.
+Discord, Spotify처럼 외부 서비스와 연동하는 기능에 필요한 키를 덱에 보관한다. PC가 바뀌어도 같은 키를 다시 입력하지 않고 쓰기 위해서다.
 
-**긴 수명의 비밀 값은 덱 밖으로 내보내지 않고, PC에는 그 값으로 발급한 짧은 수명의 토큰만 빌려준다.** 덱과 PC 사이의 통신은 이미 Noise로 암호화되고 페어링한 키로 서로를 인증하므로(4.3절), 키를 보낼 때 따로 암호화하지 않는다.
+**긴 수명의 비밀 값은 덱 밖으로 내보내지 않고, PC에는 그 값으로 발급한 짧은 수명의 토큰만 빌려준다.** 덱이 직접 쓰는 서비스(Spotify)는 PC에 토큰도 빌려주지 않는다. PC는 키를 저장하고 승인 코드를 넘기기만 한다. 덱과 PC 사이의 통신은 이미 Noise로 암호화되고 페어링한 키로 서로를 인증하므로(4.3절), 키를 보낼 때 따로 암호화하지 않는다.
 
 ### 덱이 보관하는 값
 
 | 값 | 누가 보내는가 | PC에 보내는가 |
 |---|---|---|
-| `client_id` | PC(웹 콘솔, `toss-connector discord set`) | 공개 값이라 `begin`으로 알려 준다 |
-| `client_secret`, `redirect_uri` | PC | 보내지 않는다. 덱이 토큰 주소에 요청할 때만 쓴다 |
+| `client_id`, `redirect_uri` | PC(웹 콘솔, `toss-connector discord set`, `spotify set`) | 공개 값이라 `begin`으로 알려 준다(PC가 승인 주소를 만들 때 쓴다) |
+| `client_secret` | PC | 보내지 않는다. 덱이 토큰 주소에 요청할 때만 쓴다 |
 | `refresh_token` | 덱이 토큰을 처음 발급받을 때 생긴다 | 보내지 않는다 |
-| `access_token`, `expires_at`, `scope` | 덱이 발급·갱신한다 | 빌려준다(`token`). PC는 메모리에만 둔다 |
+| `access_token`, `expires_at`, `scope` | 덱이 발급·갱신한다 | Discord는 빌려준다(`token`. PC는 메모리에만 둔다). Spotify는 보내지 않는다(덱만 쓴다) |
 
 - **저장**: `/data/toss/vault.json`에 ChaCha20-Poly1305로 암호화해 두고, 키는 `/data/toss/vault.key`에 둔다. 둘 다 소유자 전용(0600)이다. 재플래싱해도 남는다(03의 3.15절 "기기에만 남는 데이터").
 - **보호 범위**: 같은 기기에 키를 두므로 백업 이미지 같은 파일 사본이 새어 나갔을 때만 보호된다. 기기의 root 권한을 얻으면 읽을 수 있다. 지금 덱은 root에 비밀번호가 없고 SSH가 LAN에 열려 있으므로, 실질적인 보호는 SSH를 끄는 쪽에서 온다(설정 → `NETWORK` → `SSH`).
@@ -934,12 +941,13 @@ Discord처럼 외부 서비스와 연동하는 기능에 필요한 키를 덱에
 
 | `op` | `args` | 성공 시 `data` |
 |---|---|---|
-| `put` | `{"client_id", "client_secret", "redirect_uri"}`. `client_id`는 숫자, 나머지는 공백 없는 문자, `redirect_uri`는 비우거나 `http://`·`https://` 주소 | `{"ok": true}`. `client_id`가 바뀌면 이전 앱의 토큰을 지운다 |
+| `put` | `{"client_id", "client_secret", "redirect_uri"}`. `client_id`는 서비스 형식(Discord는 숫자, Spotify는 32자리 16진수), 나머지는 공백 없는 문자, `redirect_uri`는 비우거나 `http://`·`https://` 주소 | `{"ok": true}`. `client_id`가 바뀌면 이전 앱의 토큰을 지운다 |
 | `forget` | — | `{"ok": true}`. 키와 토큰을 지운다(허용 목록은 남긴다) |
-| `begin` | — | `{"client_id", "scopes"}` |
-| `token` | `{"code"}`(처음 연결할 때) 또는 없음 | `{"access_token", "expires_at", "scope"}` |
+| `begin` | — | `{"client_id", "scopes", "redirect_uri"}` |
+| `token` | `{"code"}`(처음 연결할 때) 또는 없음 | `{"access_token", "expires_at", "scope"}`. 덱만 쓰는 서비스(Spotify)는 `code`가 있을 때만 받고 `{"linked": true}`만 돌려준다 |
 
-- `token`에 `code`가 있으면 덱이 `authorization_code`로 새로 발급받는다. 없으면 보관한 토큰의 남은 시간이 1시간보다 길 때 그대로 빌려주고, 짧으면 `refresh_token`으로 갱신한 뒤 빌려준다.
+- `token`에 `code`가 있으면 덱이 `authorization_code`로 새로 발급받는다. 없으면 보관한 토큰의 남은 시간이 서비스별 여유(Discord 1시간, Spotify 5분)보다 길 때 그대로 빌려주고, 짧으면 `refresh_token`으로 갱신한 뒤 빌려준다. 갱신 응답에 새 `refresh_token`이 없으면 기존 것을 계속 쓴다.
+- 토큰 주소에 앱 키를 보내는 방식도 서비스마다 다르다: Discord는 폼 본문에, Spotify는 HTTP Basic 인증 헤더에 넣는다.
 - 토큰 요청은 한 번에 하나씩 처리한다. 갱신할 때마다 refresh 토큰이 바뀔 수 있어, 동시에 갱신하면 하나가 실패하기 때문이다.
 - 서비스가 갱신을 거절하면(`invalid_grant` 등) 덱은 토큰을 지우고 `not_linked`로 답한다. 앱 키는 남긴다.
 - 덱은 호스트당 금고 요청을 동시에 4개까지 처리하고, 넘으면 `busy`로 거절한다.
@@ -971,10 +979,43 @@ Discord처럼 외부 서비스와 연동하는 기능에 필요한 키를 덱에
 
 **명령에서 쓰기**: Discord 동작 명령(4.6절 "Discord 동작")을 등록하면 커넥터가 Discord 앱에 상주 연결한다(`src/app/host/src/discord/live.rs`). 연결할 때마다 덱에서 토큰을 빌려 `AUTHENTICATE`하고, 현재 값을 읽은 뒤(`GET_VOICE_SETTINGS`) 변경 이벤트를 구독한다(`SUBSCRIBE VOICE_SETTINGS_UPDATE`). 덱이 이 PC의 금고 사용을 거절했으면 5분 동안 다시 시도하지 않는다. 연결 상태는 웹 콘솔의 "외부 연동"에 표시된다.
 
+### Spotify
+
+| 항목 | 값 |
+|---|---|
+| 토큰 주소 | `https://accounts.spotify.com/api/token` (덱이 Wi-Fi로 직접 요청한다. 앱 키는 Basic 인증 헤더) |
+| 권한 범위 | `user-read-playback-state`, `user-read-currently-playing`, `user-modify-playback-state` |
+| 쓰는 곳 | 덱(`src/app/tossd/src/spotify.rs`)이 Spotify Web API를 직접 부른다. PC에는 토큰을 빌려주지 않는다 |
+| 로그인 | 커넥터가 있는 PC의 브라우저. 돌아오는 주소는 웹 콘솔의 `http://127.0.0.1:<콘솔 포트>/spotify/callback` |
+
+**처음 설정하는 순서**
+
+1. Premium 계정으로 [Spotify 개발자 대시보드](https://developer.spotify.com/dashboard)에서 앱을 만든다. 2026년 2~3월부터 개발 모드 앱은 앱을 만든 계정에 Premium이 있어야 동작하고(구독이 끊기면 앱도 멈춘다), 앱 하나에 승인된 사용자는 5명까지다. 재생 제어도 Premium 계정에서만 된다.
+2. 앱 설정의 Redirect URIs에 `http://127.0.0.1:7880/spotify/callback`을 등록한다(콘솔 포트를 바꿨으면 그 포트). Spotify는 `localhost`를 허용하지 않는다.
+3. PC의 웹 콘솔 "외부 연동"의 Spotify에서 Client ID와 Client Secret을 입력하고 `덱에 저장`을 누른다(또는 `toss-connector spotify set`). Redirect URI는 콘솔 주소로 고정된다. 이 PC가 처음이면 덱 화면에서 `ALLOW`를 누른다.
+4. `Spotify 연결`을 누른다(또는 `toss-connector spotify link`). 브라우저에 Spotify 로그인과 승인 화면이 뜬다. 승인하면 브라우저가 콘솔로 돌아오고 결과가 표시된다.
+5. 덱의 편집 모드에서 미디어 위젯을 추가할 때 `Source`를 `Spotify`로 고른다.
+
+**연결 절차** (`src/app/host/src/spotify.rs`)
+
+1. PC가 덱에서 `client_id`, 권한 범위, `redirect_uri`를 받는다(`begin`). `redirect_uri`가 이 콘솔의 콜백 주소와 다르면 시작하지 않는다.
+2. PC가 위조된 콜백을 막는 일회용 `state`(무작위 32바이트)를 만들고 Spotify 승인 주소를 브라우저로 연다. `state`는 10분 동안만 받는다.
+3. 사용자가 승인하면 Spotify가 브라우저를 `/spotify/callback?code=…&state=…`로 돌려보낸다. 브라우저가 여는 주소라 콘솔 토큰을 요구할 수 없으므로, `state`가 맞지 않거나 이미 쓴 것이면 거절한다. 콘솔의 Host 검사는 그대로 적용된다.
+4. PC가 승인 코드를 덱에 넘기면(`token`의 `code`) 덱이 토큰을 발급받아 보관한다. PC에는 `{"linked": true}`만 돌아온다.
+
+**덱에서 쓰기** (`src/app/tossd/src/spotify.rs`)
+
+- 미디어 위젯의 `Source`가 `Spotify`(`"@spotify"`)인 위젯이 배치에 있을 때만 조회한다. Spotify는 상태 변경을 알려 주지 않으므로 `GET /me/player`를 주기적으로 부른다: 재생 중 3초(곡이 먼저 끝나면 끝난 직후), 일시정지 6초, 재생 기기 없음 10초, 오류 15초, 승인 전 5초. 요청 제한(429)이면 `Retry-After`만큼(최대 120초) 쉰다.
+- 위젯의 버튼은 Web API로 보낸다: 재생/일시정지(`PUT /me/player/play`·`pause`), 이전·다음 곡(`POST /me/player/previous`·`next`), 5초 탐색(`PUT /me/player/seek`), 셔플(`PUT /me/player/shuffle`), 반복(`PUT /me/player/repeat`, none/playlist/track → off/context/track). 누른 뒤 0.4초 뒤에 다시 조회한다. 실패하면 위젯 앞으로 결과를 남긴다(예: `Spotify Premium required`, `No active Spotify device`).
+- 토큰이 거부되면(401) 한 번 갱신해 다시 부른다. 앨범 아트는 곡이 바뀔 때만 받는다(가로 200px 이상 중 가장 작은 이미지, 2MB 이하).
+- UI에는 `spotify` 메시지로 보낸다(03의 3.16절 "데몬–UI 통신 프로토콜"). 재생 위치는 UI가 스스로 진행시키므로 곡·상태가 같고 위치가 예상과 2초 안으로 맞으면 다시 보내지 않는다(30초마다는 보낸다).
+
 ### 관련 코드와 검증
 
-- 덱: `src/app/tossd/src/hosts/vault.rs`(보관, 암호화, 허용, 토큰 발급·갱신), `hosts/session.rs`(요청마다 별도 스레드에서 처리), UI는 `shell/VaultAsk.qml`(허용 다이얼로그)과 `shell/VaultPage.qml`(설정).
-- PC: `src/app/host/src/vault.rs`(데몬 세션으로 요청 중계), `discord.rs`, `discord/live.rs`(상주 연결), `console.rs`(웹 콘솔 API와 `discord` CLI). `discord` CLI는 실행 중인 `toss-connector`의 웹 콘솔 API를 호출하므로 웹 콘솔을 끄면(`--no-console`) 쓸 수 없다.
+- 덱: `src/app/tossd/src/hosts/vault.rs`(보관, 암호화, 허용, 토큰 발급·갱신), `spotify.rs`(Spotify 조회와 제어), `hosts/session.rs`(요청마다 별도 스레드에서 처리), UI는 `shell/VaultAsk.qml`(허용 다이얼로그)과 `shell/VaultPage.qml`(설정).
+- PC: `src/app/host/src/vault.rs`(데몬 세션으로 요청 중계), `discord.rs`, `discord/live.rs`(상주 연결), `spotify.rs`(Spotify 로그인과 콜백), `console.rs`(웹 콘솔 API와 `discord`, `spotify` CLI). `discord` CLI는 실행 중인 `toss-connector`의 웹 콘솔 API를 호출하므로 웹 콘솔을 끄면(`--no-console`) 쓸 수 없다.
 - 확인한 것(2026-11-19): 덱 단위 테스트(암호화 저장과 0600 권한, 다른 키로 열 수 없는 파일의 백업, 허용·거절·busy·연결 끊김 시 질문 회수, 키 형식 검증, 가짜 토큰 주소로 발급·재사용·갱신·갱신 토큰 교체·거절 시 연결 해제), 덱 통합 테스트(호스트 요청 → 화면 질문 → 허용 → 호스트와 화면에 상태 반영, 해제와 삭제), PC 단위 테스트(가짜 Discord IPC로 HANDSHAKE, ping 응답, 다른 이벤트 건너뛰기, 오류 응답). PC에서 덱 데몬과 커넥터를 실제로 띄워 페어링 → `discord set`(덱 화면 질문에 `ALLOW`) → 상태 조회 → `check`(승인 전이라 `not_linked`) → 허용 해제 → `forget`까지 확인했고, 비밀 값이 덱 파일·PC 설정 디렉터리·로그 어디에도 평문으로 남지 않는 것을 확인했다.
 - 실기기 확인(2026-11-19): 사용자가 실제 Discord 앱 키를 저장하고 승인해 덱이 토큰 주소에서 토큰을 발급받았다(기기의 HTTPS 포함). 빌린 토큰의 권한 범위에 `rpc.voice.read`, `rpc.voice.write`가 들어 있었고, `GET_VOICE_SETTINGS`, `SET_VOICE_SETTINGS`, `VOICE_SETTINGS_UPDATE` 구독이 실제 Discord 앱에서 동작했다. Discord 동작 명령 2개(`mute`, `deaf`)를 덱의 스위치 위젯에 연결해, Discord 단축키로 바꾼 상태와 CLI로 바꾼 상태가 곧바로 반영되고 덱 화면의 표시등이 실제 상태와 일치하는 것을 확인했다. PC 단위 테스트에는 상주 연결의 작업 루프(명령 응답, 응답 전에 온 이벤트 보존, 둘로 나뉘어 도착한 프레임, 쓰는 곳이 없어지면 종료)와 Discord 동작 명령의 등록 규칙을 더했다.
 - 확인하지 못한 것: Discord 앱을 껐다 켰을 때의 재연결, 토큰이 만료된 뒤(7일) 다시 빌려 인증하는 흐름.
+- Spotify 확인(2026-11-19): 덱 단위 테스트(Basic 인증으로 교환, PC에 토큰을 빌려주지 않음, 덱의 `own_token`과 거부된 토큰 갱신, 갱신 응답에 refresh 토큰이 없을 때 유지, client_id 형식), Spotify 모듈 테스트(재생 정보 변환(곡·에피소드·금지된 동작), 버튼 → API 요청 변환, 같은 상태 다시 보내지 않기, 가짜 API 서버로 401 뒤 갱신·앨범 아트·제어 결과(Premium 필요 포함)·조회 중단), PC 단위 테스트(승인 주소 인코딩, 쿼리 해석, 콜백의 `state` 검사: 틀림·없음·만료·재사용 거절). PC에서 덱 데몬과 커넥터를 띄워 키 저장(덱 화면 질문에 `ALLOW`), 잘못된 client_id 거절, 승인 주소, 위조·재사용 콜백 거절, 올바른 콜백의 승인 코드가 덱까지 전달되어 덱이 실제 Spotify 토큰 주소에 교환을 요청하는 것(가짜 키라 `invalid_client`로 거절됨), Spotify 미디어 위젯을 놓으면 덱이 상태를 보내는 것, 비밀 값이 평문으로 남지 않는 것을 확인했다.
+- Spotify에서 확인하지 못한 것: 실제 Spotify 계정의 로그인·토큰 발급, 재생 정보 조회와 제어, 덱 화면의 Spotify 미디어 위젯.

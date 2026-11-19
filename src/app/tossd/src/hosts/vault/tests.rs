@@ -43,13 +43,15 @@ fn asked(v: &Arc<Vault>, host: &str, op: &'static str, args: Value, allow: bool)
 struct FakeTokens {
     url: String,
     forms: Arc<Mutex<Vec<String>>>,
+    heads: Arc<Mutex<Vec<String>>>,
 }
 
 fn fake_tokens(replies: Vec<(u16, Value)>) -> FakeTokens {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}/api/oauth2/token", listener.local_addr().unwrap());
     let forms = Arc::new(Mutex::new(Vec::new()));
-    let seen = forms.clone();
+    let heads = Arc::new(Mutex::new(Vec::new()));
+    let (seen, seen_heads) = (forms.clone(), heads.clone());
     thread::spawn(move || {
         for (status, body) in replies {
             let Ok((mut s, _)) = listener.accept() else { return };
@@ -69,11 +71,12 @@ fn fake_tokens(replies: Vec<(u16, Value)>) -> FakeTokens {
                 buf.extend_from_slice(&chunk[..n]);
             }
             seen.lock().unwrap().push(String::from_utf8_lossy(&buf[head + 4..head + 4 + len]).into_owned());
+            seen_heads.lock().unwrap().push(String::from_utf8_lossy(&buf[..head]).into_owned());
             let body = body.to_string();
             let _ = write!(s, "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
         }
     });
-    FakeTokens { url, forms }
+    FakeTokens { url, forms, heads }
 }
 
 #[test]
@@ -88,7 +91,7 @@ fn the_book_is_sealed_on_disk_and_comes_back_with_the_same_key() {
     }
     let again = Vault::open(&dir, |_| {});
     assert_eq!(again.status_for("host-a")[0], VaultService { id: SERVICE_DISCORD.into(), title: "Discord".into(), registered: true, linked: false, allowed: true });
-    assert_eq!(again.handle("host-a", "pc", VAULT_BEGIN, SERVICE_DISCORD, &Value::Null).unwrap(), json!({ "client_id": "123456", "scopes": ["rpc", "rpc.voice.read", "rpc.voice.write"] }));
+    assert_eq!(again.handle("host-a", "pc", VAULT_BEGIN, SERVICE_DISCORD, &Value::Null).unwrap(), json!({ "client_id": "123456", "scopes": ["rpc", "rpc.voice.read", "rpc.voice.write"], "redirect_uri": "http://localhost" }));
 
     fs::write(dir.join("vault.key"), hex(&[7u8; 32])).unwrap();
     let other = Vault::open(&dir, |_| {});
@@ -187,5 +190,45 @@ fn tokens_are_issued_reused_refreshed_and_dropped_when_the_service_says_no() {
     assert_eq!(v.handle("host-z", "pc", VAULT_BEGIN, SERVICE_DISCORD, &Value::Null).unwrap()["client_id"], "43");
     v.handle("host-a", "pc", VAULT_FORGET, SERVICE_DISCORD, &Value::Null).unwrap();
     assert_eq!(token(Value::Null), Err(VAULT_ERR_NOT_SET.into()));
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Spotify: 앱 키는 Basic 인증 헤더로 보내고, PC에는 토큰을 빌려주지 않으며(승인 코드만 받는다), 덱은 `own_token`으로 쓴다
+#[test]
+fn spotify_tokens_stay_on_the_deck() {
+    let dir = dir("spotify");
+    let fake = fake_tokens(vec![
+        (200, json!({ "access_token": "SA1", "token_type": "Bearer", "expires_in": 3600, "refresh_token": "SR1", "scope": "user-read-playback-state" })),
+        (200, json!({ "access_token": "SA2", "token_type": "Bearer", "expires_in": 3600, "scope": "user-read-playback-state" })),
+    ]);
+    let v = Arc::new(Vault::open_with(&dir, Some(fake.url.clone()), |_| {}));
+    let id = "0123456789abcdef0123456789abcdef";
+    let keys = json!({ "client_id": id, "client_secret": "sp-secret", "redirect_uri": "http://127.0.0.1:7880/spotify/callback" });
+    assert!(v.handle("host-a", "pc", VAULT_PUT, SERVICE_SPOTIFY, &json!({ "client_id": "123", "client_secret": "x" })).unwrap_err().contains("32"));
+    let put = {
+        let v = v.clone();
+        thread::spawn(move || v.handle("host-a", "pc", VAULT_PUT, SERVICE_SPOTIFY, &keys))
+    };
+    wait_ask(&v);
+    v.answer(true);
+    put.join().unwrap().unwrap();
+    let begin = v.handle("host-a", "pc", VAULT_BEGIN, SERVICE_SPOTIFY, &Value::Null).unwrap();
+    assert_eq!((begin["client_id"].as_str(), begin["redirect_uri"].as_str()), (Some(id), Some("http://127.0.0.1:7880/spotify/callback")));
+    assert_eq!(v.own_token(SERVICE_SPOTIFY, false), Err(VAULT_ERR_NOT_LINKED.into()));
+    assert!(v.handle("host-a", "pc", VAULT_TOKEN, SERVICE_SPOTIFY, &Value::Null).is_err(), "PC에 Spotify 토큰을 빌려줌");
+
+    let linked = v.handle("host-a", "pc", VAULT_TOKEN, SERVICE_SPOTIFY, &json!({ "code": "SC0" })).unwrap();
+    assert_eq!(linked, json!({ "linked": true }), "승인 코드를 넘긴 PC에 토큰이 나감");
+    assert!(v.linked(SERVICE_SPOTIFY));
+    let head = fake.heads.lock().unwrap()[0].to_ascii_lowercase();
+    assert!(head.contains("authorization: basic mde"), "Basic 인증 헤더가 없음: {head}");
+    let form = fake.forms.lock().unwrap()[0].clone();
+    assert!(!form.contains("client_secret") && form.contains("code=SC0") && form.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A7880%2Fspotify%2Fcallback"), "{form}");
+
+    assert_eq!(v.own_token(SERVICE_SPOTIFY, false).unwrap(), "SA1");
+    assert_eq!(fake.forms.lock().unwrap().len(), 1, "남은 토큰이 있는데 다시 요청함");
+    assert_eq!(v.own_token(SERVICE_SPOTIFY, true).unwrap(), "SA2", "거부된 토큰을 버리지 않음");
+    assert!(fake.forms.lock().unwrap()[1].contains("refresh_token=SR1"));
+    assert!(v.linked(SERVICE_SPOTIFY), "갱신 응답에 refresh 토큰이 없다고 승인이 사라짐");
     let _ = fs::remove_dir_all(&dir);
 }

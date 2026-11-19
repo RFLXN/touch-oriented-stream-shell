@@ -18,6 +18,8 @@
 // 재생 위치 계산: 호스트는 트랙 변경/재생·일시정지/탐색 등 이벤트 시점에만 상태를 보내며 매초 보내지 않는다.
 //   따라서 수신된 위치에서 재생 중인 동안 클라이언트 측에서 `media.rate` 배속으로 경과 시간을 누적 계산한다(0이면 정지).
 //   새 상태가 오면 서버 기준 위치로 재동기화된다(데몬이 넘겨주는 `position_ms`는 전송 시점 기준으로 보정된 값).
+// 대상이 Spotify(`"@spotify"`)면 `host`는 덱이 직접 조회하는 Spotify 계정이다(`shell/DaemonLink`의 `spotify`). 액션도 덱이 Spotify로 처리한다.
+//   연결되지 않았거나 조회에 실패하면 `host.offline`에 사유가 담기며, 이때는 그 사유를 표시하고 버튼을 비활성화한다.
 // 앨범 아트: `host.art` (`id`, `mime`, `data`). 현재 트랙의 이미지(`media.art === host.art.id`)일 때만 표시한다.
 //   이미지는 트랙 정보보다 늦게 도착하므로 수신 전이나 커버가 없는 곡에서는 재생/일시정지 아이콘을 대신 표시한다.
 import QtQuick
@@ -95,7 +97,7 @@ CompositeWidget {
         Marquee {
             id: title
             anchors { left: artBox.right; leftMargin: 14; right: parent.right; rightMargin: 14; top: parent.top; topMargin: 22 }
-            text: !root.host ? "No host" : !root.canSee ? "Not shared" : !root.media ? "Nothing playing" : (root.media.title || "Unknown title")
+            text: !root.host ? "No host" : root.host.offline ? root.host.name : !root.canSee ? "Not shared" : !root.media ? "Nothing playing" : (root.media.title || "Unknown title")
             color: root.media ? Theme.displayInk : Theme.displayDim
             font.pixelSize: Theme.fTitle
             font.bold: true
@@ -104,6 +106,7 @@ CompositeWidget {
         Txt {
             anchors { left: title.left; right: title.right; top: title.bottom; topMargin: 4 }
             text: !root.host ? "Run toss-connector on a PC"
+                : root.host.offline ? root.host.offline
                 : !root.media ? root.host.name
                 : [root.media.artist, root.media.album].filter((s) => !!s).join(" · ")
             color: Theme.displayDim

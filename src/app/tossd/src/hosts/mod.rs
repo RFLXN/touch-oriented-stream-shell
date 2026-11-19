@@ -318,6 +318,15 @@ impl Hosts {
         self.announce_vault();
     }
 
+    /// 덱의 Spotify 모듈이 금고에서 토큰을 얻는 연결(`spotify.rs`)
+    pub fn spotify_link(self: &Arc<Self>) -> crate::spotify::Link {
+        let (a, b) = (self.clone(), self.clone());
+        crate::spotify::Link {
+            token: Box::new(move |stale| a.vault.own_token(toss_proto::SERVICE_SPOTIFY, stale)),
+            linked: Box::new(move || b.vault.linked(toss_proto::SERVICE_SPOTIFY)),
+        }
+    }
+
     /// 이 서비스의 키와 토큰을 덱에서 삭제한다.
     pub fn vault_forget(&self, service: &str) {
         self.vault.forget(service);

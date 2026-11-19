@@ -9,6 +9,7 @@
 //!   Wi-Fi            `wifi.rs` 스레드가 상태 변경 시마다 갱신
 //!   호스트           `hosts` 스레드들이 변경 시마다 갱신 (`hosts::Events`)
 //!   사이트 아이콘    `icons.rs` 스레드가 배치에 있는 웹페이지 아이콘 버튼의 아이콘을 가져올 때마다 갱신
+//!   Spotify          `spotify.rs` 스레드가 배치에 Spotify 미디어 위젯이 있는 동안 조회할 때마다 갱신
 
 use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
@@ -24,6 +25,7 @@ use toss_proto::MetricInfo;
 use crate::device::{Device, DeviceState};
 use crate::hosts::{self, Hosts, HostsState, VaultState};
 use crate::icons::{self, IconMap};
+use crate::spotify::{self, SpotifyState};
 use crate::layout::{self, Edit, Layout, SELF_HOST};
 use crate::sys::{collect_sys, SysState};
 use crate::wifi::{self, WifiCmd, WifiState};
@@ -155,6 +157,10 @@ pub struct Shared {
     pub icons: Versioned<IconMap>,
     /// 아이콘 작업 스레드에 배치에 있는 주소 목록을 전달하는 채널
     icons_tx: OnceLock<Mutex<Sender<Vec<String>>>>,
+    /// 덱이 직접 조회하는 Spotify 계정의 재생 상태(`spotify.rs`)
+    pub spotify: Versioned<SpotifyState>,
+    /// Spotify 작업 스레드에 요청(조회 여부, 재생 제어)을 전달하는 채널(호스트 수신을 끄면 없다)
+    spotify_tx: OnceLock<Mutex<Sender<spotify::Cmd>>>,
 }
 
 impl Shared {
@@ -168,7 +174,7 @@ impl Shared {
     /// 다만 여러 클라이언트가 동시에 편집할 때 저장/알림 순서가 뒤바뀌지 않도록 작업 전체를 `editing` 뮤텍스로 직렬화한다.
     pub fn edit_layout(&self, edit: Edit) {
         let _editing = self.editing.lock().unwrap();
-        let (accepted, watched, icons) = self.layout.update_with(|layout| {
+        let (accepted, watched, icons, spotify) = self.layout.update_with(|layout| {
             let accepted = match layout.edit(&edit) {
                 Ok(()) => Some(layout.clone()),
                 Err(why) => {
@@ -176,7 +182,7 @@ impl Shared {
                     None
                 }
             };
-            (true, (accepted, layout.watched(), layout.icon_urls()))
+            (true, (accepted, layout.watched(), layout.icon_urls(), layout.wants_spotify()))
         });
         if let Some(layout) = accepted {
             self.layout_store.save(&layout);
@@ -184,6 +190,14 @@ impl Shared {
         }
         self.watch(watched);
         self.want_icons(icons);
+        self.want_spotify(spotify);
+    }
+
+    /// Spotify 작업 스레드에 배치에 Spotify 미디어 위젯이 있는지 알린다.
+    fn want_spotify(&self, on: bool) {
+        if let Some(tx) = self.spotify_tx.get() {
+            let _ = tx.lock().unwrap().send(spotify::Cmd::Want(on));
+        }
     }
 
     /// 아이콘 작업 스레드에 배치에 있는 웹페이지 아이콘 버튼의 주소 목록을 알린다.
@@ -221,7 +235,15 @@ impl Shared {
     }
 
     /// 위젯이 호스트에 액션을 요청한다. 대상 호스트가 연결되어 있지 않아 전송하지 못하면 해당 위젯 앞으로 실패 결과를 기록한다.
+    /// 대상이 Spotify(`spotify::SOURCE`)면 덱의 Spotify 모듈로 보낸다.
     pub fn action(&self, host: &str, name: &str, args: serde_json::Value, widget: Option<u32>) {
+        if host == spotify::SOURCE {
+            let sent = self.spotify_tx.get().is_some_and(|tx| tx.lock().unwrap().send(spotify::Cmd::Act { name: name.into(), args, widget }).is_ok());
+            if let (false, Some(widget)) = (sent, widget) {
+                self.set_result(widget, false, "no_host".into());
+            }
+            return;
+        }
         let sent = self.hosts_ctl.get().is_some_and(|hosts| hosts.action(host, name, args, widget));
         if let (false, Some(widget)) = (sent, widget) {
             self.set_result(widget, false, "no_host".into());
@@ -380,14 +402,19 @@ pub fn spawn_feeds(shared: &Arc<Shared>, wpa_ctrl: PathBuf, host: Option<(Socket
     let icons_tx = icons::spawn(host.as_ref().map(|(_, dir)| icons::dir_under(dir)), move |map| icons_to.icons.set(map));
     let _ = shared.icons_tx.set(Mutex::new(icons_tx));
     if let Some((addr, data_dir)) = host {
-        let _ = shared.hosts_ctl.set(hosts::spawn(addr, data_dir, crate::sys::hostname(), shared.clone()));
+        let hosts = hosts::spawn(addr, data_dir, crate::sys::hostname(), shared.clone());
+        let (to_ui, to_widget) = (shared.clone(), shared.clone());
+        let tx = spotify::spawn(hosts.spotify_link(), move |state| to_ui.spotify.set(state), move |widget, ok, error| to_widget.set_result(widget, ok, error));
+        let _ = shared.spotify_tx.set(Mutex::new(tx));
+        let _ = shared.hosts_ctl.set(hosts);
     }
-    let (watched, icons) = {
+    let (watched, icons, spotify) = {
         let layout = shared.layout.lock();
-        (layout.watched(), layout.icon_urls())
+        (layout.watched(), layout.icon_urls(), layout.wants_spotify())
     };
     shared.watch(watched);
     shared.want_icons(icons);
+    shared.want_spotify(spotify);
 }
 
 #[cfg(test)]

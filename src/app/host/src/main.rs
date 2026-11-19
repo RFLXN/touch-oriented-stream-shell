@@ -3,7 +3,8 @@
 //! 인자 없이 실행하면 페어링된 덱에 접속해 데몬으로 동작한다(프로토콜: src/app/proto, 설계 문서: docs/04-host-link.md):
 //!   - 호스트 상태를 이벤트 기반으로 덱에 전송(재생 정보·앨범 아트, 등록된 명령과 상태 값, 리소스 사용량)
 //!   - 덱의 요청 실행(미디어 제어, 등록된 명령 실행 및 값 설정; 덱은 등록된 항목 중에서만 선택 가능, 웹페이지 열기)
-//!   - 덱 금고 중계: 외부 연동 키는 덱에 보관하고, 이 PC는 덱에서 빌린 토큰만 쓴다(현재는 Discord)
+//!   - 덱 금고 중계: 외부 연동 키는 덱에 보관하고, 이 PC는 덱에서 빌린 토큰만 쓴다(Discord). Spotify는 덱이 직접 쓰며
+//!     이 PC는 키 저장과 브라우저 로그인만 돕는다
 //!
 //! 모든 동작은 해당 덱에 부여된 권한 범위 내에서만 수행한다(trust 모듈). 미허용 요청은 거절하고 로그에 기록한다.
 //!
@@ -22,7 +23,7 @@
 //!   store     설정 디렉터리 관리(키 쌍, 페어링 목록).  jsonfile  안전한 JSON 읽기/쓰기
 //!   trust     덱별 권한 테이블 및 검증.  managed  시스템(NixOS) 관리 설정
 //!   commands  사용자 명령 등록/실행/감시.  media, art  미디어 제어 및 앨범 아트.  meter  리소스 측정
-//!   vault     덱 금고 요청 중계.  discord  Discord 앱 연결(로컬 RPC).  web  웹페이지 열기
+//!   vault     덱 금고 요청 중계.  discord  Discord 앱 연결(로컬 RPC).  spotify  Spotify 로그인(승인 코드를 덱에 전달).  web  웹페이지 열기
 
 mod art;
 mod cli;
@@ -37,6 +38,7 @@ mod media;
 mod meter;
 mod pairing;
 mod session;
+mod spotify;
 mod standby;
 mod store;
 mod trust;
@@ -94,6 +96,10 @@ const USAGE: &str = "사용법:
   toss-connector discord link         Discord 앱에서 승인을 받아 덱이 토큰을 발급받게 함 (처음 한 번)
   toss-connector discord check        덱에서 토큰을 빌려 Discord 앱에 인증해 보기
   toss-connector discord forget       덱에서 Discord 키와 토큰 삭제
+  toss-connector spotify              Spotify 연동 상태 조회 (키와 토큰은 덱에만 있고, 재생 정보는 덱이 직접 가져옴)
+  toss-connector spotify set          Spotify 앱 키(Client ID, Client Secret)를 입력받아 덱에 저장
+  toss-connector spotify link         브라우저로 Spotify에 로그인해 덱이 토큰을 발급받게 함 (처음 한 번)
+  toss-connector spotify forget       덱에서 Spotify 키와 토큰 삭제
                                  discord 명령은 실행 중인 toss-connector(웹 콘솔 포함)와 덱 연결이 필요합니다.
                                  이 PC가 처음 덱 금고를 쓰면 덱 화면에서 허용 여부를 묻습니다.
 옵션:
@@ -152,6 +158,7 @@ fn main() {
         "managed" => cli::managed(&store, &rest),
         "console" => console::cli(&store, &rest),
         "discord" => console::discord_cli(&store, rest.first().map(String::as_str)),
+        "spotify" => console::spotify_cli(&store, rest.first().map(String::as_str)),
         other => usage(&format!("알 수 없는 명령: {other}")),
     }
 }
@@ -171,7 +178,7 @@ fn misplaced(command: &str, rest: &[String], deck: bool, tail: bool, no_console:
     }
     let most = match (command, first) {
         ("pair" | "list", _) => 0,
-        ("forget" | "sleep" | "wake" | "trust" | "discord", _) => 1,
+        ("forget" | "sleep" | "wake" | "trust" | "discord" | "spotify", _) => 1,
         ("managed", Some("check")) => 2,
         ("managed", _) => 1,
         ("console", Some("allow" | "deny" | "port")) => 2,

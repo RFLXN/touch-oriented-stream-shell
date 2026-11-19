@@ -1,4 +1,6 @@
-//! 덱 금고: 외부 연동(현재는 Discord)의 키를 덱에 보관하고, 페어링된 PC에는 그 키로 발급한 짧은 수명의 토큰만 빌려준다.
+//! 덱 금고: 외부 연동(Discord, Spotify)의 키를 덱에 보관하고, 페어링된 PC에는 그 키로 발급한 짧은 수명의 토큰만 빌려준다.
+//! 덱이 직접 쓰는 서비스(Spotify)는 PC에 토큰을 빌려주지 않는다(`Service::lend`). PC는 키를 저장하고 승인 코드를 넘기기만 하고,
+//! 덱의 모듈이 `own_token`으로 토큰을 얻는다.
 //! 요청 형식은 `toss-proto`의 `HostMsg::Vault`, 전체 설계는 `docs/04-host-link.md` 4.15절 참고.
 //!
 //! 서비스마다 보관하는 값
@@ -31,7 +33,7 @@ use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use toss_proto::{
-    VaultService, SERVICE_DISCORD, VAULT_ASK_WAIT, VAULT_BEGIN, VAULT_ERR_BUSY, VAULT_ERR_DENIED, VAULT_ERR_NOT_LINKED, VAULT_ERR_NOT_SET, VAULT_ERR_TIMEOUT, VAULT_ERR_UNKNOWN, VAULT_FORGET, VAULT_PUT,
+    VaultService, SERVICE_DISCORD, SERVICE_SPOTIFY, VAULT_ASK_WAIT, VAULT_BEGIN, VAULT_ERR_BUSY, VAULT_ERR_DENIED, VAULT_ERR_NOT_LINKED, VAULT_ERR_NOT_SET, VAULT_ERR_TIMEOUT, VAULT_ERR_UNKNOWN, VAULT_FORGET, VAULT_PUT,
     VAULT_TOKEN,
 };
 
@@ -39,23 +41,53 @@ use crate::persist;
 
 /// 거절한 PC의 같은 요청을 묻지 않고 거절하는 시간
 const DENY_COOLDOWN: Duration = Duration::from_secs(300);
-/// 보관한 토큰의 남은 시간이 이보다 짧으면 빌려주기 전에 갱신한다
-const REFRESH_BEFORE: Duration = Duration::from_secs(3600);
 /// 토큰 주소 요청의 연결·응답 제한 시간
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 /// 암호문에 함께 묶는 값(다른 용도의 암호문과 섞이지 않게)
 const AAD: &[u8] = b"toss-vault-1";
 const SECRET_MAX: usize = 256;
 
-/// 금고가 다루는 서비스: 토큰 주소와 요청할 권한 범위
+/// 금고가 다루는 서비스: 토큰 주소, 요청할 권한 범위와 서비스마다 다른 규칙
 pub struct Service {
     pub id: &'static str,
     pub title: &'static str,
     token_url: &'static str,
     scopes: &'static [&'static str],
+    /// 보관한 토큰의 남은 시간이 이보다 짧으면 쓰기 전에 갱신한다(서비스마다 토큰 수명이 다르다)
+    refresh_before: Duration,
+    /// 토큰 주소에 앱 키를 HTTP Basic 인증으로 보낸다(아니면 폼 본문에 넣는다)
+    basic_auth: bool,
+    /// PC에 토큰을 빌려준다. 아니면 덱만 쓴다(PC의 `token` 요청은 승인 코드를 넘길 때만 받고, 토큰은 돌려주지 않는다)
+    lend: bool,
+    /// client_id 형식 검사와 그 설명
+    client_id_ok: fn(&str) -> bool,
+    client_id_about: &'static str,
 }
 
-pub const SERVICES: &[Service] = &[Service { id: SERVICE_DISCORD, title: "Discord", token_url: "https://discord.com/api/oauth2/token", scopes: &["rpc", "rpc.voice.read", "rpc.voice.write"] }];
+pub const SERVICES: &[Service] = &[
+    Service {
+        id: SERVICE_DISCORD,
+        title: "Discord",
+        token_url: "https://discord.com/api/oauth2/token",
+        scopes: &["rpc", "rpc.voice.read", "rpc.voice.write"],
+        refresh_before: Duration::from_secs(3600),
+        basic_auth: false,
+        lend: true,
+        client_id_ok: |id| id.len() <= 32 && id.bytes().all(|b| b.is_ascii_digit()),
+        client_id_about: "client_id는 숫자로 된 애플리케이션 ID여야 합니다",
+    },
+    Service {
+        id: SERVICE_SPOTIFY,
+        title: "Spotify",
+        token_url: "https://accounts.spotify.com/api/token",
+        scopes: &["user-read-playback-state", "user-read-currently-playing", "user-modify-playback-state"],
+        refresh_before: Duration::from_secs(300),
+        basic_auth: true,
+        lend: false,
+        client_id_ok: |id| id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit()),
+        client_id_about: "client_id는 32자리 16진수여야 합니다(Spotify 개발자 대시보드의 Client ID)",
+    },
+];
 
 fn service(id: &str) -> Option<&'static Service> {
     SERVICES.iter().find(|s| s.id == id)
@@ -216,10 +248,10 @@ fn printable(text: &str) -> bool {
 }
 
 /// `put`으로 받은 키 필드 검증
-fn checked_keys(args: &Value) -> Result<(String, String, String), String> {
+fn checked_keys(svc: &Service, args: &Value) -> Result<(String, String, String), String> {
     let (id, secret, redirect) = (field(args, "client_id"), field(args, "client_secret"), field(args, "redirect_uri"));
-    if id.is_empty() || id.len() > 32 || !id.bytes().all(|b| b.is_ascii_digit()) {
-        return Err("client_id는 숫자로 된 애플리케이션 ID여야 합니다".into());
+    if id.is_empty() || !(svc.client_id_ok)(id) {
+        return Err(svc.client_id_about.into());
     }
     if !printable(secret) {
         return Err("client_secret이 비어 있거나 허용되지 않는 문자가 있습니다".into());
@@ -230,10 +262,15 @@ fn checked_keys(args: &Value) -> Result<(String, String, String), String> {
     Ok((id.to_string(), secret.to_string(), redirect.to_string()))
 }
 
-/// 토큰 주소에 폼을 보내고 JSON 응답을 받는다
-fn post_form(url: &str, form: &[(&str, &str)]) -> Result<Value, Fail> {
+/// 토큰 주소에 폼을 보내고 JSON 응답을 받는다. `basic`이 있으면 앱 키를 HTTP Basic 인증 헤더로 보낸다.
+fn post_form(url: &str, basic: Option<(&str, &str)>, form: &[(&str, &str)]) -> Result<Value, Fail> {
+    use base64::Engine;
     let agent = ureq::AgentBuilder::new().timeout(HTTP_TIMEOUT).user_agent(concat!("tossd/", env!("CARGO_PKG_VERSION"))).build();
-    match agent.post(url).set("Accept", "application/json").send_form(form) {
+    let mut req = agent.post(url).set("Accept", "application/json");
+    if let Some((id, secret)) = basic {
+        req = req.set("Authorization", &format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(format!("{id}:{secret}"))));
+    }
+    match req.send_form(form) {
         Ok(res) => {
             let text = res.into_string().map_err(|e| Fail::Other(format!("응답을 읽을 수 없습니다: {e}")))?;
             serde_json::from_str(&text).map_err(|_| Fail::Other("응답이 JSON이 아닙니다".into()))
@@ -337,10 +374,13 @@ impl Vault {
         if ![VAULT_PUT, VAULT_FORGET, VAULT_BEGIN, VAULT_TOKEN].contains(&op) {
             return Err(VAULT_ERR_UNKNOWN.into());
         }
-        let checked = if op == VAULT_PUT { Some(checked_keys(args)?) } else { None };
+        let checked = if op == VAULT_PUT { Some(checked_keys(svc, args)?) } else { None };
         let code = field(args, "code");
         if op == VAULT_TOKEN && !code.is_empty() && !printable(code) {
             return Err("승인 코드 형식이 올바르지 않습니다".into());
+        }
+        if op == VAULT_TOKEN && code.is_empty() && !svc.lend {
+            return Err(format!("{} 토큰은 덱만 씁니다(PC에 빌려주지 않음)", svc.title));
         }
         self.permit(host, name, svc)?;
         match op {
@@ -367,11 +407,17 @@ impl Vault {
                 Ok(json!({ "ok": true }))
             }
             VAULT_BEGIN => {
-                let client_id = self.book.lock().unwrap().services.get(svc.id).map(|k| k.client_id.clone()).ok_or(VAULT_ERR_NOT_SET)?;
-                Ok(json!({ "client_id": client_id, "scopes": svc.scopes }))
+                let (client_id, redirect_uri) = self.book.lock().unwrap().services.get(svc.id).map(|k| (k.client_id.clone(), k.redirect_uri.clone())).ok_or(VAULT_ERR_NOT_SET)?;
+                Ok(json!({ "client_id": client_id, "scopes": svc.scopes, "redirect_uri": redirect_uri }))
             }
             _ => {
                 let got = self.token(svc, (!code.is_empty()).then_some(code));
+                if !svc.lend {
+                    if got.is_ok() {
+                        eprintln!("vault: {name}이(가) 넘긴 승인 코드로 {} 토큰을 발급받음", svc.title);
+                    }
+                    return got.map(|_| json!({ "linked": true }));
+                }
                 if got.is_ok() {
                     eprintln!("vault: {name}에 {} 토큰을 빌려줌", svc.title);
                 }
@@ -430,7 +476,8 @@ impl Vault {
         let _one = self.tokens.lock().unwrap();
         let keys = self.book.lock().unwrap().services.get(svc.id).cloned().ok_or(VAULT_ERR_NOT_SET)?;
         let url = self.token_url.as_deref().unwrap_or(svc.token_url);
-        let mut form = vec![("client_id", keys.client_id.as_str()), ("client_secret", keys.client_secret.as_str())];
+        let basic = svc.basic_auth.then_some((keys.client_id.as_str(), keys.client_secret.as_str()));
+        let mut form = if svc.basic_auth { Vec::new() } else { vec![("client_id", keys.client_id.as_str()), ("client_secret", keys.client_secret.as_str())] };
         match code {
             Some(code) => {
                 form.extend([("grant_type", "authorization_code"), ("code", code)]);
@@ -438,11 +485,11 @@ impl Vault {
                     form.push(("redirect_uri", keys.redirect_uri.as_str()));
                 }
             }
-            None if !keys.access_token.is_empty() && keys.expires_at > now_secs() + REFRESH_BEFORE.as_secs() => return Ok(lent(&keys)),
+            None if !keys.access_token.is_empty() && keys.expires_at > now_secs() + svc.refresh_before.as_secs() => return Ok(lent(&keys)),
             None if keys.refresh_token.is_empty() => return Err(VAULT_ERR_NOT_LINKED.into()),
             None => form.extend([("grant_type", "refresh_token"), ("refresh_token", keys.refresh_token.as_str())]),
         }
-        let got = match post_form(url, &form) {
+        let got = match post_form(url, basic, &form) {
             Ok(got) => got,
             Err(Fail::Rejected(why)) if code.is_none() => {
                 eprintln!("vault: {} 토큰 갱신이 거절됨({why}). 다시 연결해야 합니다", svc.title);
@@ -488,6 +535,22 @@ impl Vault {
             self.save();
             self.announce();
         }
+    }
+
+    /// 덱이 직접 쓸 토큰을 얻는다(호스트 허용을 거치지 않는다). `stale`이면 보관한 토큰을 버리고 갱신한다
+    /// (서비스가 토큰을 거부했을 때). 실패하면 `VAULT_ERR_*` 코드나 사유 문장을 돌려준다.
+    pub fn own_token(&self, service_id: &str, stale: bool) -> Result<String, String> {
+        let svc = service(service_id).ok_or(VAULT_ERR_UNKNOWN)?;
+        if stale {
+            let client_id = self.book.lock().unwrap().services.get(svc.id).map(|k| k.client_id.clone()).unwrap_or_default();
+            self.update(svc, &client_id, |k| k.expires_at = 0);
+        }
+        self.token(svc, None).map(|v| v["access_token"].as_str().unwrap_or_default().to_string())
+    }
+
+    /// 서비스 승인을 받아 refresh 토큰이 있는지 여부
+    pub fn linked(&self, service_id: &str) -> bool {
+        self.book.lock().unwrap().services.get(service_id).is_some_and(|k| !k.refresh_token.is_empty())
     }
 
     /// 화면에서 묻고 있는 요청에 답한다

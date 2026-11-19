@@ -179,6 +179,11 @@ impl Layout {
         out
     }
 
+    /// 배치에 Spotify를 대상으로 고른 미디어 플레이어 위젯이 있는지 여부(있을 때만 덱이 Spotify를 조회한다)
+    pub fn wants_spotify(&self) -> bool {
+        self.pages.iter().flat_map(|p| &p.widgets).any(|w| w.kind == Kind::MediaPlayer && w.settings.get("host").and_then(Value::as_str) == Some(crate::spotify::SOURCE))
+    }
+
     /// 아이콘을 표시하는 웹페이지 버튼(`web.icon`)들의 주소(중복 제거)
     pub fn icon_urls(&self) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();

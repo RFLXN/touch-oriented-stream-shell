@@ -15,6 +15,8 @@
 // 사용자 입력(명령 이름, 커맨드 등)을 DOM에 삽입할 때는 XSS 방지를 위해 textContent만 사용한다.
 // 외부 연동(Discord) 키 입력 칸은 HTML에 고정해 두어 1.5초마다 다시 그려도 입력 중인 값이 사라지지 않는다.
 // Client Secret은 덱으로 보내기만 하고 저장에 성공하면 칸을 비운다(브라우저 저장소에도 남기지 않는다).
+// Spotify 연결은 빈 탭을 먼저 연 뒤(팝업 차단을 피하려고 클릭 직후에 연다) API가 돌려준 Spotify 승인 주소로 보낸다.
+// 로그인을 마치면 Spotify가 이 콘솔의 `/spotify/callback`으로 돌아오고, 그 탭에 결과가 표시된다.
 // 명령 편집의 "Discord" 종류는 셸 커맨드 대신 Discord 동작(state.discord_actions)을 고른다. 실제 종류(스위치 등)는 동작이 정한다.
 "use strict";
 
@@ -158,7 +160,7 @@ function draw() {
   once("decks", [state.decks, state.permissions], drawDecks);
   once("pairing", state.pairing, drawPairing);
   once("commands", [state.commands, state.managed], drawCommands);
-  once("links", [state.vault, state.discord, state.decks.map((d) => [d.key, d.name])], drawLinks);
+  once("links", [state.vault, state.discord, state.spotify, state.spotify_callback, state.decks.map((d) => [d.key, d.name])], drawLinks);
   once("about", [state.origins, state.host, state.managed, api], drawAbout);
 }
 
@@ -417,6 +419,28 @@ function drawLinks() {
     : job.phase === "done" ? "인증됨: " + job.who.name + (job.who.expires ? " · 토큰 만료 " + job.who.expires : "") : job.error;
   p.append(h("p", { class: job.phase === "failed" ? "error" : "note" }, text));
   if (!busy) p.append(h("div", { class: "keys" }, h("button", { class: "key small", onclick: () => act("POST", "/api/discord/clear") }, "닫기")));
+  drawSpotify(v);
+}
+
+function drawSpotify(v) {
+  const s = v && v.services.find((x) => x.id === "spotify");
+  const job = state.spotify || { phase: "idle" };
+  const busy = job.phase === "browser" || job.phase === "deck";
+  const tag = (text, on) => h("span", { class: "tag" + (on ? " on" : "") }, text);
+  $("spotify-tags").replaceChildren(...(s ? [tag(s.registered ? "키 저장됨" : "키 없음", s.registered), tag(s.linked ? "연결됨" : "연결 안 됨", s.linked)] : []));
+  $("s-redirect").value = state.spotify_callback || "";
+  $("spotify-link").disabled = !s || !s.registered || job.phase === "deck";
+  $("spotify-forget").disabled = !s || !s.registered || busy;
+  $("s-save").disabled = !s || busy;
+  const p = $("spotify-progress");
+  p.hidden = job.phase === "idle";
+  p.replaceChildren();
+  if (job.phase === "idle") return;
+  const text = job.phase === "browser" ? "브라우저에서 Spotify에 로그인하고 승인하세요..."
+    : job.phase === "deck" ? "덱이 Spotify 토큰을 발급받는 중..."
+    : job.phase === "done" ? "Spotify 연결을 마쳤습니다. 덱이 재생 정보를 직접 가져옵니다." : job.error;
+  p.append(h("p", { class: job.phase === "failed" ? "error" : "note" }, text));
+  if (job.phase !== "deck") p.append(h("div", { class: "keys" }, h("button", { class: "key small", onclick: () => act("POST", "/api/spotify/clear") }, "닫기")));
 }
 
 $("discord-form").onsubmit = async (e) => {
@@ -427,6 +451,24 @@ $("discord-form").onsubmit = async (e) => {
   if (saved) $("d-secret").value = "";
 };
 $("discord-link").onclick = () => act("POST", "/api/discord/link");
+$("spotify-form").onsubmit = async (e) => {
+  e.preventDefault();
+  toast("덱에 저장하는 중... 이 PC가 처음이면 덱 화면에서 ALLOW를 누르세요.");
+  const saved = await act("POST", "/api/vault/spotify/put",
+    { client_id: $("s-id").value, client_secret: $("s-secret").value, redirect_uri: $("s-redirect").value }, "덱에 저장했습니다. 이 PC에는 남기지 않았습니다.");
+  if (saved) $("s-secret").value = "";
+};
+$("spotify-link").onclick = async () => {
+  const tab = window.open("about:blank", "_blank");
+  const r = await act("POST", "/api/spotify/link");
+  if (r && r.url && tab) tab.location = r.url;
+  else if (tab) tab.close();
+  if (r && r.url && !tab) toast("팝업이 막혔습니다. 이 주소를 직접 여세요: " + r.url, true);
+};
+$("spotify-forget").onclick = async () => {
+  if (await ask("Spotify 키 삭제", "덱에 보관한 Spotify 앱 키와 토큰을 삭제합니다. 다시 쓰려면 키를 저장하고 다시 연결해야 합니다.", "삭제"))
+    act("POST", "/api/vault/spotify/forget", null, "삭제되었습니다");
+};
 $("discord-check").onclick = () => act("POST", "/api/discord/check");
 $("discord-forget").onclick = async () => {
   if (await ask("Discord 키 삭제", "덱에 보관한 Discord 앱 키와 토큰을 삭제합니다. 다시 쓰려면 키를 저장하고 다시 연결해야 합니다.", "삭제"))

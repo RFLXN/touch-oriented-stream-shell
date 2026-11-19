@@ -38,12 +38,13 @@ struct Seen {
     result_seq: u64,
     vault: u64,
     icons: u64,
+    spotify: u64,
 }
 
 impl Seen {
     fn new(shared: &Shared) -> Self {
         let never = u64::MAX;
-        Self { sys: never, wifi: never, layout: never, device: never, hosts: never, values: never, meter_infos: never, meter_values: never, results: never, result_seq: shared.results.lock().seq(), vault: never, icons: never }
+        Self { sys: never, wifi: never, layout: never, device: never, hosts: never, values: never, meter_infos: never, meter_values: never, results: never, result_seq: shared.results.lock().seq(), vault: never, icons: never, spotify: never }
     }
 }
 
@@ -82,6 +83,9 @@ fn push(ws: &mut WebSocket<TcpStream>, shared: &Shared, seen: &mut Seen) -> Resu
     }
     if let Some(icons) = shared.icons.fresh(&mut seen.icons) {
         send(ws, &ServerMsg::Icons { icons: &icons })?;
+    }
+    if let Some(spotify) = shared.spotify.fresh(&mut seen.spotify) {
+        send(ws, &ServerMsg::Spotify(&spotify))?;
     }
     if let Some(results) = shared.results.fresh(&mut seen.results) {
         for (widget, seq, ok, error) in results.since(seen.result_seq) {

@@ -51,6 +51,8 @@ Loader {
     readonly property var shownHost: {
         if (wantedHost === "")
             return host
+        if (wantedHost === "@spotify")
+            return link ? link.spotify : null
         for (const h of hosts)
             if (h.id === wantedHost)
                 return h.connected ? h : null

@@ -7,8 +7,8 @@
 //   connected     WebSocket 연결 상태
 //   daemonVersion 데몬 버전(`hello`)
 //   catalog       추가 가능한 앱 및 위젯 카탈로그  [{"id":..,"title":..,"about":..,"widgets":[{"kind":..,"title":..,"about":..,
-//                 "form":"widget|button","w":..,"h":..,"label":..,"settings":[{"key":..,"title":..,"about":..,"type":"host|command|metrics|text|color",
-//                 "required":..,"filter":..,"own":..,"max":..}]}]}]   (`shell/AddPanel`에서 사용)
+//                 "form":"widget|button","w":..,"h":..,"label":..,"settings":[{"key":..,"title":..,"about":..,"type":"host|command|metrics|text|url|color|light",
+//                 "required":..,"filter":..,"own":..,"spotify":..,"max":..}]}]}]   (`shell/AddPanel`에서 사용)
 //   sys           시스템 상태  {"host":..,"ip":..,"links":{"usb":..,"eth":..,"wlan":..},
 //                              "net":{"usb":{"name":..,"up":..,"mac":..,"addr":..},"eth":{..},"wlan":{..},"usb_state":..,"eth_speed":..,"bt_present":..}}
 //   cols, rows    페이지 그리드 크기(4x6)
@@ -39,6 +39,9 @@
 //   vault         덱 금고 상태  {"services":[{"id":"discord","title":"Discord","registered":..,"linked":..,"hosts":[허용한 호스트 id..]}],
 //                               "asking":{"host":..,"name":..,"service":..,"title":..} 또는 null(허용 여부를 묻는 중인 요청)}  (키 값은 오지 않는다)
 //   icons         사이트 아이콘  {"<주소>":"data:image/png;base64,.."}  — 웹페이지 아이콘 버튼이 표시한다(가져오지 못한 주소는 없음)
+//   spotify       덱이 직접 조회하는 Spotify 계정. 미디어 위젯이 호스트처럼 쓸 수 있게 호스트와 같은 모양으로 바꿔 둔다:
+//                 {"id":"@spotify","name":"Spotify","connected":..,"linked":..,"caps":[..],"media":..,"art":..,
+//                  "offline":"<연결되지 않았을 때 보여 줄 문장. 연결되어 있으면 빈 문자열>"}
 // 송신 메서드:
 //   action(name, args, hostId, widget)   호스트에 액션 전송. `name`은 `"media.play_pause"` 등(`src/app/proto`의 `ACTION_*`), `args`는 인자 객체.
 //                                        `hostId`가 비어 있으면 연결된 첫 번째 호스트로 전송한다. `widget`(위젯 ID)을 넘기면 결과가 `results`로 돌아온다.
@@ -85,6 +88,7 @@ Item {
     property var pairing: ({ active: false, candidate: null })
     property var vault: ({ services: [], asking: null })
     property var icons: ({})
+    property var spotify: null
     readonly property var host: {
         for (const h of hosts)
             if (h.connected)
@@ -158,6 +162,13 @@ Item {
             case "meter_values": link.meterValues = m.hosts; break
             case "vault": link.vault = { services: m.services, asking: m.asking }; break
             case "icons": link.icons = m.icons; break
+            case "spotify":
+                link.spotify = {
+                    id: "@spotify", name: "Spotify", connected: m.live, linked: m.linked,
+                    offline: !m.linked ? "Link Spotify in toss-connector console" : m.live ? "" : (m.error || "Waiting for Spotify"),
+                    caps: m.live ? ["media.info", "media.control"] : [], media: m.media, art: m.art
+                }
+                break
             case "result":
                 link.results = Object.assign({}, link.results, { [m.widget]: { seq: m.seq, ok: m.ok, error: m.error, at: Date.now() } })
                 break
