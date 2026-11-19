@@ -20,6 +20,10 @@
 //   새 상태가 오면 서버 기준 위치로 재동기화된다(데몬이 넘겨주는 `position_ms`는 전송 시점 기준으로 보정된 값).
 // 대상이 Spotify(`"@spotify"`)면 `host`는 덱이 직접 조회하는 Spotify 계정이다(`shell/DaemonLink`의 `spotify`). 액션도 덱이 Spotify로 처리한다.
 //   연결되지 않았거나 조회에 실패하면 `host.offline`에 사유가 담기며, 이때는 그 사유를 표시하고 버튼을 비활성화한다.
+// 대상이 Spotify면 Spotify 앱처럼 동작한다(`host.extra`는 `shell/DaemonLink`의 `spotify` 참고):
+//   키 배치       좋아요 / 셔플 / 이전 곡 / 재생·일시정지 / 다음 곡 / 반복 / 대기열(5초 탐색 키 대신 좋아요와 대기열)
+//   정보 줄       부제 아래에 대기열의 다음 곡, 진행 막대 위에 재생 기기 이름. 기기 줄을 누르면 기기 목록 창이 뜬다(`shell/SpotifySheet`)
+// `Spotify theme`을 켜면 이 위젯 대신 `widgets/SpotifyPlayer`가 쓰인다(`shell/WidgetSlot`).
 // 앨범 아트: `host.art` (`id`, `mime`, `data`). 현재 트랙의 이미지(`media.art === host.art.id`)일 때만 표시한다.
 //   이미지는 트랙 정보보다 늦게 도착하므로 수신 전이나 커버가 없는 곡에서는 재생/일시정지 아이콘을 대신 표시한다.
 import QtQuick
@@ -104,6 +108,7 @@ CompositeWidget {
             running: root.playing
         }
         Txt {
+            id: subtitle
             anchors { left: title.left; right: title.right; top: title.bottom; topMargin: 4 }
             text: !root.host ? "Run toss-connector on a PC"
                 : root.host.offline ? root.host.offline
@@ -114,6 +119,34 @@ CompositeWidget {
             elide: Text.ElideRight
         }
 
+        Txt {
+            anchors { left: title.left; right: title.right; top: subtitle.bottom; topMargin: 10 }
+            visible: !!root.sp && !!root.media && root.sp.queue.length > 0
+            text: visible ? "Next  " + root.sp.queue[0].title + (root.sp.queue[0].artist ? " · " + root.sp.queue[0].artist : "") : ""
+            color: Theme.displayDim
+            font.pixelSize: Theme.fSmall
+            elide: Text.ElideRight
+        }
+        Item {
+            anchors { left: title.left; right: title.right; bottom: elapsed.top; bottomMargin: 10 }
+            height: 26
+            visible: !!root.sp && root.host.connected
+            Row {
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 8
+                Glyph { anchors.verticalCenter: parent.verticalCenter; name: "device"; size: 18; color: Theme.displayDim }
+                Txt {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: root.sp && root.sp.device ? root.sp.device : "Choose a device"
+                    color: Theme.displayDim
+                    font.pixelSize: Theme.fSmall
+                }
+            }
+            MouseArea {
+                anchors.fill: parent
+                onClicked: root.action("spotify.devices", null)
+            }
+        }
         Txt {
             id: elapsed
             anchors { left: title.left; bottom: parent.bottom; bottomMargin: 14 }
@@ -132,11 +165,13 @@ CompositeWidget {
         }
         ProgressBar {
             anchors { left: elapsed.right; leftMargin: 12; right: total.left; rightMargin: 12; verticalCenter: elapsed.verticalCenter }
+
             value: root.media && root.media.length_ms > 0 ? Math.min(1, root.posMs / root.media.length_ms) : 0
         }
     }
 
     readonly property int step: 5000
+    readonly property var sp: host && host.id === "@spotify" && host.extra ? host.extra : null
     readonly property bool canSeek: canControl && !!media && !!media.can_seek
     readonly property bool hasLoop: !!media && media.loop_mode !== undefined && media.loop_mode !== null
     readonly property bool hasShuffle: !!media && media.shuffle !== undefined && media.shuffle !== null
@@ -164,14 +199,29 @@ CompositeWidget {
             Glyph { anchors.centerIn: parent; name: stateKey.glyph; size: 28; color: stateKey.inkColor }
         }
 
-        StateKey {
-            id: loop
+        component LoopKey: StateKey {
             readonly property string mode: root.hasLoop ? root.media.loop_mode : "none"
             usable: root.canControl && root.hasLoop
             on: mode !== "none"
             onTapped: root.action("media.loop", { mode: mode === "none" ? "playlist" : mode === "playlist" ? "track" : "none" })
             glyph: mode === "track" ? "repeat1" : "repeat"
         }
+        component ShuffleKey: StateKey {
+            usable: root.canControl && root.hasShuffle
+            on: root.hasShuffle && root.media.shuffle
+            onTapped: root.action("media.shuffle", { on: !on })
+            glyph: "shuffle"
+        }
+
+        StateKey {
+            visible: !!root.sp
+            usable: root.canControl && !!root.media && root.sp.liked !== null && root.sp.liked !== undefined
+            on: root.sp ? root.sp.liked === true : false
+            onTapped: root.action("spotify.like", { on: !on })
+            glyph: on ? "hearton" : "heart"
+        }
+        ShuffleKey { visible: !!root.sp }
+        LoopKey { visible: !root.sp }
         Key {
             id: prev
             usable: root.canControl && !!root.media && root.media.can_prev
@@ -180,6 +230,7 @@ CompositeWidget {
         }
         Key {
             id: back
+            visible: !root.sp
             usable: root.canSeek
             onTapped: root.action("media.seek", { offset_ms: -root.step })
             Glyph { anchors.centerIn: parent; name: "rew"; size: 28; color: back.inkColor }
@@ -194,6 +245,7 @@ CompositeWidget {
         }
         Key {
             id: forward
+            visible: !root.sp
             usable: root.canSeek
             onTapped: root.action("media.seek", { offset_ms: root.step })
             Glyph { anchors.centerIn: parent; name: "ffwd"; size: 28; color: forward.inkColor }
@@ -204,12 +256,14 @@ CompositeWidget {
             onTapped: root.action("media.next", null)
             Glyph { anchors.centerIn: parent; name: "next"; size: 28; color: next.inkColor }
         }
-        StateKey {
-            id: shuffle
-            usable: root.canControl && root.hasShuffle
-            on: root.hasShuffle && root.media.shuffle
-            onTapped: root.action("media.shuffle", { on: !on })
-            glyph: "shuffle"
+        LoopKey { visible: !!root.sp }
+        ShuffleKey { visible: !root.sp }
+        Key {
+            id: queueKey
+            visible: !!root.sp
+            usable: !!root.host && root.host.connected
+            onTapped: root.action("spotify.queue", null)
+            Glyph { anchors.centerIn: parent; name: "queue"; size: 28; color: queueKey.inkColor }
         }
     }
 }

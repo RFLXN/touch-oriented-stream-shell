@@ -272,6 +272,27 @@ fn command_buttons_go_into_rack_cells() {
     assert!(widget_of(&l, 3).is_some());
 }
 
+/// 미디어 위젯은 대상과 Spotify 테마(불리언만)를 설정에 남긴다
+#[test]
+fn the_media_widget_keeps_a_spotify_theme_flag() {
+    let mut l = default_layout();
+    l.pages.push(Page::default());
+    let add = |json: &str| Edit::Add { what: "media.player".into(), page: 1, settings: serde_json::from_str(json).unwrap() };
+    l.edit(&add(r#"{"host":"@spotify","spotify_theme":true}"#)).unwrap();
+    let w = l.pages[1].widgets.last().unwrap().clone();
+    assert_eq!((w.settings.get("host"), w.settings.get("spotify_theme")), (Some(&Value::String("@spotify".into())), Some(&Value::Bool(true))));
+    assert!(l.wants_spotify());
+    l.edit(&Edit::Remove { target: Target::Widget, id: w.id }).unwrap();
+    assert!(!l.wants_spotify());
+    l.edit(&Edit::Add { what: "media.combo".into(), page: 1, settings: serde_json::from_str(r#"{"host":"pc1","spotify_theme":false}"#).unwrap() }).unwrap();
+    let combo = l.pages[1].widgets.last().unwrap().clone();
+    assert!(combo.kind == Kind::MediaCombo && (combo.w, combo.h) == (4, 2) && l.wants_spotify(), "PC+Spotify 위젯이 있는데 Spotify를 조회하지 않음");
+    assert_eq!(combo.settings.get("spotify_theme"), Some(&Value::Bool(false)));
+    l.edit(&Edit::Remove { target: Target::Widget, id: combo.id }).unwrap();
+    l.edit(&add(r#"{"host":"@spotify","spotify_theme":"yes"}"#)).unwrap();
+    assert_eq!(l.pages[1].widgets.last().unwrap().settings.get("spotify_theme"), None, "불리언이 아닌 값을 남김");
+}
+
 /// 스위치만 인디케이터 색상(`light`)을 설정에 남긴다. 다른 명령 위젯에서는 버린다.
 #[test]
 fn only_switches_keep_an_indicator_color() {

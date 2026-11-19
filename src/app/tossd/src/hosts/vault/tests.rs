@@ -198,7 +198,7 @@ fn tokens_are_issued_reused_refreshed_and_dropped_when_the_service_says_no() {
 fn spotify_tokens_stay_on_the_deck() {
     let dir = dir("spotify");
     let fake = fake_tokens(vec![
-        (200, json!({ "access_token": "SA1", "token_type": "Bearer", "expires_in": 3600, "refresh_token": "SR1", "scope": "user-read-playback-state" })),
+        (200, json!({ "access_token": format!("SA1{}", "x".repeat(400)), "token_type": "Bearer", "expires_in": 3600, "refresh_token": "SR1", "scope": "user-read-playback-state" })),
         (200, json!({ "access_token": "SA2", "token_type": "Bearer", "expires_in": 3600, "scope": "user-read-playback-state" })),
     ]);
     let v = Arc::new(Vault::open_with(&dir, Some(fake.url.clone()), |_| {}));
@@ -217,15 +217,17 @@ fn spotify_tokens_stay_on_the_deck() {
     assert_eq!(v.own_token(SERVICE_SPOTIFY, false), Err(VAULT_ERR_NOT_LINKED.into()));
     assert!(v.handle("host-a", "pc", VAULT_TOKEN, SERVICE_SPOTIFY, &Value::Null).is_err(), "PC에 Spotify 토큰을 빌려줌");
 
-    let linked = v.handle("host-a", "pc", VAULT_TOKEN, SERVICE_SPOTIFY, &json!({ "code": "SC0" })).unwrap();
+    let long_code = format!("SC0{}", "-_aZ9".repeat(80));
+    assert!(v.handle("host-a", "pc", VAULT_TOKEN, SERVICE_SPOTIFY, &json!({ "code": "has space" })).is_err());
+    let linked = v.handle("host-a", "pc", VAULT_TOKEN, SERVICE_SPOTIFY, &json!({ "code": long_code })).unwrap();
     assert_eq!(linked, json!({ "linked": true }), "승인 코드를 넘긴 PC에 토큰이 나감");
     assert!(v.linked(SERVICE_SPOTIFY));
     let head = fake.heads.lock().unwrap()[0].to_ascii_lowercase();
     assert!(head.contains("authorization: basic mde"), "Basic 인증 헤더가 없음: {head}");
     let form = fake.forms.lock().unwrap()[0].clone();
-    assert!(!form.contains("client_secret") && form.contains("code=SC0") && form.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A7880%2Fspotify%2Fcallback"), "{form}");
+    assert!(!form.contains("client_secret") && form.contains(&format!("code={long_code}")) && form.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A7880%2Fspotify%2Fcallback"), "{form}");
 
-    assert_eq!(v.own_token(SERVICE_SPOTIFY, false).unwrap(), "SA1");
+    assert_eq!(v.own_token(SERVICE_SPOTIFY, false).unwrap(), format!("SA1{}", "x".repeat(400)), "긴 토큰을 받지 못함");
     assert_eq!(fake.forms.lock().unwrap().len(), 1, "남은 토큰이 있는데 다시 요청함");
     assert_eq!(v.own_token(SERVICE_SPOTIFY, true).unwrap(), "SA2", "거부된 토큰을 버리지 않음");
     assert!(fake.forms.lock().unwrap()[1].contains("refresh_token=SR1"));

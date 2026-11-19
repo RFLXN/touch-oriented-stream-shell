@@ -176,6 +176,11 @@ Window {
             anchors.fill: parent
         }
 
+        SpotifySheet {
+            anchors.fill: parent
+            link: daemon
+        }
+
         VaultAsk {
             anchors.fill: parent
             link: daemon

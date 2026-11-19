@@ -10,7 +10,11 @@
 //! `DRIFT_MS` 안으로 맞으면 UI에 다시 보내지 않는다(앨범 아트가 든 상태를 매번 보내지 않기 위함). 다만 `RESEND_AFTER`마다는 보낸다.
 //!
 //! 재생 제어(`media.*` 액션)는 Spotify Premium 계정에서만 된다. 실패하면 위젯 앞으로 결과를 남긴다(`Events::result`와 같은 경로).
-//! 앨범 아트는 곡이 바뀔 때만 받아 `data:` URI용 base64로 보관한다(`ART_MAX`보다 크면 받지 않는다).
+//! 앨범 아트는 곡이 바뀔 때만 받아 `data:` URI용 base64로 보관하고, 대표 색(`color`)도 이때 한 번 계산한다(`ART_MAX`보다 크면 받지 않는다).
+//!
+//! Spotify 전용 요청(`ACTION_*`): 대기열(`spotify.queue`)과 기기 목록(`spotify.devices`)은 UI가 창을 열 때 요청하면 새로 받아 상태에 담는다.
+//! 대기열은 곡이 바뀔 때도 받는다(다음 곡 표시용). 좋아요(`spotify.like`)는 지금 곡을 라이브러리에 넣거나 빼고, 곡이 바뀔 때 여부를 묻는다.
+//! 기기 전환(`spotify.transfer`)은 고른 기기로 재생을 옮긴다. 기기 ID와 곡 URI는 경로·쿼리에 들어가므로 형식을 엄격히 검사한다.
 
 use std::io::Read;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
@@ -19,7 +23,7 @@ use std::time::{Duration, Instant};
 
 use base64::Engine;
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use toss_proto::{Media, ACTION_MEDIA_LOOP, ACTION_MEDIA_NEXT, ACTION_MEDIA_PLAY_PAUSE, ACTION_MEDIA_PREV, ACTION_MEDIA_SEEK, ACTION_MEDIA_SHUFFLE, LOOP_NONE, LOOP_PLAYLIST, LOOP_TRACK};
 
 use crate::hosts::Art;
@@ -38,6 +42,15 @@ const LIMITED_MAX: Duration = Duration::from_secs(120);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 const ART_MAX: u64 = 2 * 1024 * 1024;
 const DRIFT_MS: u64 = 2000;
+const QUEUE_MAX: usize = 20;
+const DEVICES_MAX: usize = 16;
+const NAME_MAX: usize = 120;
+
+/// 미디어 위젯의 Spotify 전용 요청(덱이 처리하며 PC에는 가지 않는다)
+pub const ACTION_QUEUE: &str = "spotify.queue";
+pub const ACTION_DEVICES: &str = "spotify.devices";
+pub const ACTION_TRANSFER: &str = "spotify.transfer";
+pub const ACTION_LIKE: &str = "spotify.like";
 /// 바뀐 것이 없어도 이만큼 지나면 다시 보낸다(나중에 연결한 UI가 오래된 재생 위치를 받지 않게)
 const RESEND_AFTER: Duration = Duration::from_secs(30);
 
@@ -53,6 +66,30 @@ pub struct SpotifyState {
     pub art: Option<Art>,
     /// 마지막 조회가 실패한 사유(화면에 보여 줄 짧은 영어 문장)
     pub error: String,
+    /// 지금 재생 중인 기기 이름
+    pub device: String,
+    /// 지금 곡이 좋아요(라이브러리)에 있는지(모르면 `null`)
+    pub liked: Option<bool>,
+    /// 대기열의 다음 곡들(곡이 바뀔 때와 `spotify.queue` 요청 때 다시 받는다)
+    pub queue: Vec<Track>,
+    /// Spotify Connect 기기 목록(`spotify.devices` 요청 때만 받는다)
+    pub devices: Vec<Device>,
+    /// 앨범 아트의 대표 색(`#rrggbb`. 모르면 빈 문자열)
+    pub color: String,
+}
+
+#[derive(Serialize, Clone, PartialEq, Debug)]
+pub struct Track {
+    pub title: String,
+    pub artist: String,
+}
+
+#[derive(Serialize, Clone, PartialEq, Debug)]
+pub struct Device {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub active: bool,
 }
 
 /// 작업 스레드에 보내는 요청
@@ -132,33 +169,67 @@ struct Worker {
     publish: Box<dyn Fn(SpotifyState) + Send>,
     /// 마지막으로 UI에 보낸 상태와 보낸 시각
     shown: Option<(SpotifyState, Instant)>,
+    /// 마지막 조회 결과(대기열·기기 목록 등을 덧붙이기 전)와 조회 시각
+    base: (SpotifyState, Instant),
     /// 지금 곡의 상태와 조회 시각(제어할 때 현재 위치를 계산하는 기준)
     now: Option<(Media, Instant)>,
+    /// 지금 곡의 Spotify URI(좋아요와 대기열을 곡이 바뀔 때만 다시 묻기 위함)
+    track_uri: String,
+    device: String,
+    liked: Option<bool>,
+    queue: Vec<Track>,
+    devices: Vec<Device>,
     art_url: String,
     art: Option<Art>,
+    color: String,
 }
 
 impl Worker {
     fn new(api: String, link: Link, publish: Box<dyn Fn(SpotifyState) + Send>) -> Self {
         let agent = ureq::AgentBuilder::new().timeout(HTTP_TIMEOUT).user_agent(concat!("tossd/", env!("CARGO_PKG_VERSION"))).build();
-        Self { api, agent, link, publish, shown: None, now: None, art_url: String::new(), art: None }
+        Self {
+            api,
+            agent,
+            link,
+            publish,
+            shown: None,
+            base: (SpotifyState::default(), Instant::now()),
+            now: None,
+            track_uri: String::new(),
+            device: String::new(),
+            liked: None,
+            queue: Vec::new(),
+            devices: Vec::new(),
+            art_url: String::new(),
+            art: None,
+            color: String::new(),
+        }
     }
 
     /// 조회하지 않는 동안: 승인 여부만 알린다
     fn idle(&mut self) {
-        self.now = None;
         let linked = (self.link.linked)();
-        self.show(SpotifyState { linked, ..SpotifyState::default() });
+        self.forget_track();
+        self.settle(SpotifyState { linked, ..SpotifyState::default() });
+    }
+
+    /// 곡이 없어졌을 때 곡에 딸린 정보를 지운다
+    fn forget_track(&mut self) {
+        self.now = None;
+        self.track_uri.clear();
+        self.device.clear();
+        self.liked = None;
+        self.queue.clear();
     }
 
     /// 지금 상태를 조회해 알리고, 다음 조회까지 기다릴 시간을 돌려준다
     fn poll(&mut self) -> Duration {
         if !(self.link.linked)() {
-            self.now = None;
-            self.show(SpotifyState::default());
+            self.forget_track();
+            self.settle(SpotifyState::default());
             return UNLINKED_EVERY;
         }
-        match self.call("GET", "/me/player", &[("additional_types", "track,episode".into())]) {
+        match self.call("GET", "/me/player", &[("additional_types", "track,episode".into())], None) {
             Ok(Some(v)) => match media_from(&v) {
                 Some((media, art_url)) => {
                     self.fetch_art(&art_url);
@@ -171,8 +242,15 @@ impl Worker {
                         PAUSED_EVERY
                     };
                     self.now = Some((media.clone(), Instant::now()));
+                    self.device = v["device"]["name"].as_str().unwrap_or_default().chars().take(NAME_MAX).collect();
+                    let uri = v["item"]["uri"].as_str().unwrap_or_default().to_string();
+                    if uri != self.track_uri {
+                        self.track_uri = uri;
+                        self.liked = self.check_liked();
+                        self.queue = self.fetch_queue().unwrap_or_default();
+                    }
                     let art = self.art.clone().filter(|_| !media.art.is_empty());
-                    self.show(SpotifyState { linked: true, live: true, media: Some(media), art, error: String::new() });
+                    self.settle(SpotifyState { linked: true, live: true, media: Some(media), art, ..SpotifyState::default() });
                     wait
                 }
                 None => self.nothing(),
@@ -180,13 +258,13 @@ impl Worker {
             Ok(None) => self.nothing(),
             Err(Fail::Limited(wait)) => wait,
             Err(Fail::Unlinked) => {
-                self.now = None;
-                self.show(SpotifyState::default());
+                self.forget_track();
+                self.settle(SpotifyState::default());
                 UNLINKED_EVERY
             }
             Err(Fail::Failed(why)) => {
-                self.now = None;
-                self.show(SpotifyState { linked: true, error: why, ..SpotifyState::default() });
+                self.forget_track();
+                self.settle(SpotifyState { linked: true, error: why, ..SpotifyState::default() });
                 ERROR_EVERY
             }
         }
@@ -194,9 +272,32 @@ impl Worker {
 
     /// 재생 기기가 없거나 아무것도 재생하지 않는 상태
     fn nothing(&mut self) -> Duration {
-        self.now = None;
-        self.show(SpotifyState { linked: true, live: true, ..SpotifyState::default() });
+        self.forget_track();
+        self.settle(SpotifyState { linked: true, live: true, ..SpotifyState::default() });
         IDLE_EVERY
+    }
+
+    /// 조회 결과를 기억하고 덧붙일 정보를 채워 알린다
+    fn settle(&mut self, base: SpotifyState) {
+        self.base = (base, Instant::now());
+        self.refresh();
+    }
+
+    /// 마지막 조회 결과에 기기·대기열·좋아요·앨범 색을 덧붙여 알린다(재생 위치는 지금 시점으로 맞춘다)
+    fn refresh(&mut self) {
+        let (base, at) = &self.base;
+        let mut state = base.clone();
+        if let Some(m) = &mut state.media {
+            m.position_ms = m.position_after(at.elapsed().as_millis() as u64);
+            state.device = self.device.clone();
+            state.liked = self.liked;
+            state.queue = self.queue.clone();
+            state.color = self.color.clone();
+        }
+        if state.linked {
+            state.devices = self.devices.clone();
+        }
+        self.show(state);
     }
 
     /// 곡, 재생 상태, 아트가 같고 위치만 예상대로 흘렀으면 다시 보내지 않는다
@@ -215,12 +316,14 @@ impl Worker {
             return;
         }
         self.art_url = url.to_string();
+        self.color.clear();
         self.art = match self.agent.get(url).call() {
             Ok(res) => {
                 let mime = res.content_type().to_string();
                 let mut bytes = Vec::new();
                 match res.into_reader().take(ART_MAX + 1).read_to_end(&mut bytes) {
                     Ok(n) if n as u64 <= ART_MAX && mime.starts_with("image/") => {
+                        self.color = main_color(&bytes).unwrap_or_default();
                         Some(Art { id: art_id(url), mime, data: base64::engine::general_purpose::STANDARD.encode(&bytes) })
                     }
                     _ => None,
@@ -233,20 +336,76 @@ impl Worker {
         };
     }
 
-    /// 위젯의 제어 요청을 실행한다. 실패하면 화면에 보여 줄 짧은 사유를 돌려준다.
-    fn act(&mut self, name: &str, args: &Value) -> Result<(), String> {
-        let now = self.now.as_ref().map(|(m, at)| (m, m.position_after(at.elapsed().as_millis() as u64)));
-        let (method, path, query) = request_for(name, args, now)?;
-        match self.call(method, path, &query) {
-            Ok(_) => Ok(()),
+    /// 지금 곡이 라이브러리(좋아요)에 있는지(곡이 없거나 권한이 없으면 `None`)
+    fn check_liked(&self) -> Option<bool> {
+        if !library_uri(&self.track_uri) {
+            return None;
+        }
+        match self.call("GET", "/me/library/contains", &[("uris", self.track_uri.clone())], None) {
+            Ok(Some(v)) => v[0].as_bool(),
+            Ok(None) => None,
+            Err(Fail::Failed(why)) => {
+                eprintln!("spotify: 좋아요 여부를 알 수 없습니다: {why}");
+                None
+            }
+            Err(_) => None,
+        }
+    }
+
+    fn fetch_queue(&self) -> Result<Vec<Track>, String> {
+        match self.call("GET", "/me/player/queue", &[], None) {
+            Ok(Some(v)) => Ok(queue_from(&v)),
+            Ok(None) => Ok(Vec::new()),
+            Err(Fail::Failed(why)) => Err(why),
             Err(Fail::Limited(_)) => Err("Spotify is busy. Try again shortly".into()),
             Err(Fail::Unlinked) => Err("Spotify is not linked".into()),
-            Err(Fail::Failed(why)) => Err(why),
+        }
+    }
+
+    /// 위젯의 요청을 실행한다. 실패하면 화면에 보여 줄 짧은 사유를 돌려준다.
+    fn act(&mut self, name: &str, args: &Value) -> Result<(), String> {
+        let failed = |f: Fail| match f {
+            Fail::Limited(_) => "Spotify is busy. Try again shortly".to_string(),
+            Fail::Unlinked => "Spotify is not linked".to_string(),
+            Fail::Failed(why) => why,
+        };
+        match name {
+            ACTION_QUEUE => {
+                self.queue = self.fetch_queue()?;
+                self.refresh();
+                Ok(())
+            }
+            ACTION_DEVICES => {
+                let v = self.call("GET", "/me/player/devices", &[], None).map_err(failed)?;
+                self.devices = v.as_ref().map(devices_from).unwrap_or_default();
+                self.refresh();
+                Ok(())
+            }
+            ACTION_TRANSFER => {
+                let id = args["id"].as_str().filter(|id| device_id(id)).ok_or("Bad device")?;
+                self.call("PUT", "/me/player", &[], Some(&json!({ "device_ids": [id], "play": true }))).map_err(failed)?;
+                Ok(())
+            }
+            ACTION_LIKE => {
+                let on = args["on"].as_bool().ok_or("Bad like value")?;
+                if !library_uri(&self.track_uri) {
+                    return Err("Nothing to like".into());
+                }
+                self.call(if on { "PUT" } else { "DELETE" }, "/me/library", &[("uris", self.track_uri.clone())], None).map_err(failed)?;
+                self.liked = Some(on);
+                self.refresh();
+                Ok(())
+            }
+            _ => {
+                let now = self.now.as_ref().map(|(m, at)| (m, m.position_after(at.elapsed().as_millis() as u64)));
+                let (method, path, query) = request_for(name, args, now)?;
+                self.call(method, path, &query, None).map(|_| ()).map_err(failed)
+            }
         }
     }
 
     /// API를 부른다. 토큰이 거부되면(401) 한 번 갱신해 다시 부른다. 본문이 없는 응답이면 `None`
-    fn call(&self, method: &str, path: &str, query: &[(&str, String)]) -> Result<Option<Value>, Fail> {
+    fn call(&self, method: &str, path: &str, query: &[(&str, String)], body: Option<&Value>) -> Result<Option<Value>, Fail> {
         for stale in [false, true] {
             let token = (self.link.token)(stale).map_err(|e| match e.as_str() {
                 toss_proto::VAULT_ERR_NOT_LINKED | toss_proto::VAULT_ERR_NOT_SET => Fail::Unlinked,
@@ -256,7 +415,11 @@ impl Worker {
             for (k, v) in query {
                 req = req.query(k, v);
             }
-            let res = if method == "GET" { req.call() } else { req.send_string("") };
+            let res = match (method, body) {
+                ("GET", _) => req.call(),
+                (_, Some(b)) => req.set("Content-Type", "application/json").send_string(&b.to_string()),
+                (_, None) => req.send_string(""),
+            };
             match res {
                 Ok(res) if res.status() == 204 => return Ok(None),
                 Ok(res) => return Ok(res.into_string().ok().and_then(|t| serde_json::from_str(&t).ok())),
@@ -275,6 +438,65 @@ impl Worker {
         }
         Err(Fail::Failed("Spotify refused the token".into()))
     }
+}
+
+/// 라이브러리(좋아요)에 넣을 수 있는 곡·에피소드 URI인지(쿼리에 그대로 넣으므로 형식을 엄격히 본다)
+fn library_uri(uri: &str) -> bool {
+    let id = uri.strip_prefix("spotify:track:").or_else(|| uri.strip_prefix("spotify:episode:")).unwrap_or_default();
+    id.len() == 22 && id.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
+/// Spotify Connect 기기 ID 형식
+fn device_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
+/// 곡이나 에피소드 객체를 대기열 항목으로 바꾼다
+fn track_of(item: &Value) -> Option<Track> {
+    let title = item["name"].as_str()?.chars().take(NAME_MAX).collect();
+    let artist = if item["type"] == "episode" {
+        item["show"]["name"].as_str().unwrap_or_default().to_string()
+    } else {
+        item["artists"].as_array().map(|a| a.iter().filter_map(|x| x["name"].as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default()
+    };
+    Some(Track { title, artist: artist.chars().take(NAME_MAX).collect() })
+}
+
+/// `/me/player/queue` 응답의 다음 곡들(최대 `QUEUE_MAX`개)
+fn queue_from(v: &Value) -> Vec<Track> {
+    v["queue"].as_array().map(|a| a.iter().filter_map(track_of).take(QUEUE_MAX).collect()).unwrap_or_default()
+}
+
+/// `/me/player/devices` 응답의 기기들(제어할 수 없는 기기는 뺀다)
+fn devices_from(v: &Value) -> Vec<Device> {
+    v["devices"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter(|d| !d["is_restricted"].as_bool().unwrap_or(false))
+                .filter_map(|d| {
+                    let id = d["id"].as_str().filter(|id| device_id(id))?.to_string();
+                    let name = d["name"].as_str().unwrap_or("Device").chars().take(NAME_MAX).collect();
+                    Some(Device { id, name, kind: d["type"].as_str().unwrap_or_default().chars().take(24).collect(), active: d["is_active"].as_bool().unwrap_or(false) })
+                })
+                .take(DEVICES_MAX)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 앨범 아트의 대표 색(`#rrggbb`). 채도가 높은 픽셀에 가중치를 더 준 평균이다.
+fn main_color(bytes: &[u8]) -> Option<String> {
+    let img = image::load_from_memory(bytes).ok()?.thumbnail(24, 24).to_rgb8();
+    let (mut sum, mut weight) = ([0f64; 3], 0f64);
+    for p in img.pixels() {
+        let [r, g, b] = p.0.map(f64::from);
+        let (hi, lo) = (r.max(g).max(b), r.min(g).min(b));
+        let w = 0.15 + if hi > 0.0 { (hi - lo) / hi } else { 0.0 };
+        sum = [sum[0] + r * w, sum[1] + g * w, sum[2] + b * w];
+        weight += w;
+    }
+    (weight > 0.0).then(|| format!("#{:02x}{:02x}{:02x}", (sum[0] / weight) as u8, (sum[1] / weight) as u8, (sum[2] / weight) as u8))
 }
 
 /// API 오류 응답을 화면에 보여 줄 짧은 문장으로 바꾼다
@@ -378,9 +600,15 @@ fn request_for(name: &str, args: &Value, now: Option<(&Media, u64)>) -> Result<R
 fn same_but_time(a: &SpotifyState, b: &SpotifyState, elapsed_ms: u64) -> bool {
     match (&a.media, &b.media) {
         (Some(x), Some(y)) => {
-            let expected = x.position_after(elapsed_ms);
-            let near = expected.abs_diff(y.position_ms) <= DRIFT_MS;
-            near && Media { position_ms: 0, ..x.clone() } == Media { position_ms: 0, ..y.clone() } && (a.linked, a.live, &a.art, &a.error) == (b.linked, b.live, &b.art, &b.error)
+            let near = x.position_after(elapsed_ms).abs_diff(y.position_ms) <= DRIFT_MS;
+            let still = |s: &SpotifyState| {
+                let mut s = s.clone();
+                if let Some(m) = &mut s.media {
+                    m.position_ms = 0;
+                }
+                s
+            };
+            near && still(a) == still(b)
         }
         _ => a == b,
     }

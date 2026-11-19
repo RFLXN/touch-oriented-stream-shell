@@ -46,6 +46,8 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 /// 암호문에 함께 묶는 값(다른 용도의 암호문과 섞이지 않게)
 const AAD: &[u8] = b"toss-vault-1";
 const SECRET_MAX: usize = 256;
+/// 승인 코드와 서비스가 발급한 토큰의 최대 길이(Spotify의 승인 코드와 토큰은 수백 자다)
+const TOKEN_MAX: usize = 4096;
 
 /// 금고가 다루는 서비스: 토큰 주소, 요청할 권한 범위와 서비스마다 다른 규칙
 pub struct Service {
@@ -80,7 +82,7 @@ pub const SERVICES: &[Service] = &[
         id: SERVICE_SPOTIFY,
         title: "Spotify",
         token_url: "https://accounts.spotify.com/api/token",
-        scopes: &["user-read-playback-state", "user-read-currently-playing", "user-modify-playback-state"],
+        scopes: &["user-read-playback-state", "user-read-currently-playing", "user-modify-playback-state", "user-library-read", "user-library-modify"],
         refresh_before: Duration::from_secs(300),
         basic_auth: true,
         lend: false,
@@ -244,7 +246,11 @@ fn field<'a>(args: &'a Value, name: &str) -> &'a str {
 }
 
 fn printable(text: &str) -> bool {
-    !text.is_empty() && text.len() <= SECRET_MAX && text.bytes().all(|b| b.is_ascii_graphic())
+    printable_up_to(text, SECRET_MAX)
+}
+
+fn printable_up_to(text: &str, max: usize) -> bool {
+    !text.is_empty() && text.len() <= max && text.bytes().all(|b| b.is_ascii_graphic())
 }
 
 /// `put`으로 받은 키 필드 검증
@@ -376,7 +382,7 @@ impl Vault {
         }
         let checked = if op == VAULT_PUT { Some(checked_keys(svc, args)?) } else { None };
         let code = field(args, "code");
-        if op == VAULT_TOKEN && !code.is_empty() && !printable(code) {
+        if op == VAULT_TOKEN && !code.is_empty() && !printable_up_to(code, TOKEN_MAX) {
             return Err("승인 코드 형식이 올바르지 않습니다".into());
         }
         if op == VAULT_TOKEN && code.is_empty() && !svc.lend {
@@ -502,9 +508,9 @@ impl Vault {
             }
             Err(Fail::Rejected(why) | Fail::Other(why)) => return Err(format!("{} 토큰 발급 실패: {why}", svc.title)),
         };
-        let access = got["access_token"].as_str().filter(|t| printable(t)).ok_or_else(|| format!("{} 응답에 access_token이 없습니다", svc.title))?.to_string();
+        let access = got["access_token"].as_str().filter(|t| printable_up_to(t, TOKEN_MAX)).ok_or_else(|| format!("{} 응답에 access_token이 없습니다", svc.title))?.to_string();
         let expires_at = now_secs() + got["expires_in"].as_u64().unwrap_or(0);
-        let refresh = got["refresh_token"].as_str().filter(|t| printable(t)).map(str::to_string);
+        let refresh = got["refresh_token"].as_str().filter(|t| printable_up_to(t, TOKEN_MAX)).map(str::to_string);
         let scope = got["scope"].as_str().unwrap_or_default().to_string();
         let mut fresh = None;
         self.update(svc, &keys.client_id, |k| {

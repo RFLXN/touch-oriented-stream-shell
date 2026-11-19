@@ -53,7 +53,7 @@ DropPanel {
         }
         const first = {}
         for (const s of kind.settings)
-            first[s.key] = s.type === "color" ? "bone" : s.type === "url" ? "https://" : s.type === "metrics" ? [] : s.type === "host" && s.own ? "@deck" : ""
+            first[s.key] = s.type === "color" ? "bone" : s.type === "url" ? "https://" : s.type === "metrics" ? [] : s.type === "flag" ? !!s.initial : s.type === "host" && s.own ? "@deck" : ""
         chosen = first
         page = "options"
     }

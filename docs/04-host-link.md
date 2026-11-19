@@ -984,7 +984,7 @@ Discord, Spotify처럼 외부 서비스와 연동하는 기능에 필요한 키�
 | 항목 | 값 |
 |---|---|
 | 토큰 주소 | `https://accounts.spotify.com/api/token` (덱이 Wi-Fi로 직접 요청한다. 앱 키는 Basic 인증 헤더) |
-| 권한 범위 | `user-read-playback-state`, `user-read-currently-playing`, `user-modify-playback-state` |
+| 권한 범위 | `user-read-playback-state`, `user-read-currently-playing`, `user-modify-playback-state`, `user-library-read`, `user-library-modify`(좋아요). 권한 범위가 늘면 `Spotify 연결`을 다시 해야 새 범위가 토큰에 들어간다 |
 | 쓰는 곳 | 덱(`src/app/tossd/src/spotify.rs`)이 Spotify Web API를 직접 부른다. PC에는 토큰을 빌려주지 않는다 |
 | 로그인 | 커넥터가 있는 PC의 브라우저. 돌아오는 주소는 웹 콘솔의 `http://127.0.0.1:<콘솔 포트>/spotify/callback` |
 
@@ -994,7 +994,7 @@ Discord, Spotify처럼 외부 서비스와 연동하는 기능에 필요한 키�
 2. 앱 설정의 Redirect URIs에 `http://127.0.0.1:7880/spotify/callback`을 등록한다(콘솔 포트를 바꿨으면 그 포트). Spotify는 `localhost`를 허용하지 않는다.
 3. PC의 웹 콘솔 "외부 연동"의 Spotify에서 Client ID와 Client Secret을 입력하고 `덱에 저장`을 누른다(또는 `toss-connector spotify set`). Redirect URI는 콘솔 주소로 고정된다. 이 PC가 처음이면 덱 화면에서 `ALLOW`를 누른다.
 4. `Spotify 연결`을 누른다(또는 `toss-connector spotify link`). 브라우저에 Spotify 로그인과 승인 화면이 뜬다. 승인하면 브라우저가 콘솔로 돌아오고 결과가 표시된다.
-5. 덱의 편집 모드에서 미디어 위젯을 추가할 때 `Source`를 `Spotify`로 고른다.
+5. 덱의 편집 모드에서 미디어 위젯을 추가할 때 `Source`를 `Spotify`로 고른다. 이어서 나오는 `Spotify theme`을 `On`으로 하면 덱 테마 대신 Spotify 앱의 재생 화면처럼 그린다(03의 "Spotify 플레이어").
 
 **연결 절차** (`src/app/host/src/spotify.rs`)
 
@@ -1005,9 +1005,12 @@ Discord, Spotify처럼 외부 서비스와 연동하는 기능에 필요한 키�
 
 **덱에서 쓰기** (`src/app/tossd/src/spotify.rs`)
 
-- 미디어 위젯의 `Source`가 `Spotify`(`"@spotify"`)인 위젯이 배치에 있을 때만 조회한다. Spotify는 상태 변경을 알려 주지 않으므로 `GET /me/player`를 주기적으로 부른다: 재생 중 3초(곡이 먼저 끝나면 끝난 직후), 일시정지 6초, 재생 기기 없음 10초, 오류 15초, 승인 전 5초. 요청 제한(429)이면 `Retry-After`만큼(최대 120초) 쉰다.
+- 미디어 위젯의 `Source`가 `Spotify`(`"@spotify"`)인 위젯이나 PC+Spotify 위젯(`media.combo`)이 배치에 있을 때만 조회한다. Spotify는 상태 변경을 알려 주지 않으므로 `GET /me/player`를 주기적으로 부른다: 재생 중 3초(곡이 먼저 끝나면 끝난 직후), 일시정지 6초, 재생 기기 없음 10초, 오류 15초, 승인 전 5초. 요청 제한(429)이면 `Retry-After`만큼(최대 120초) 쉰다.
 - 위젯의 버튼은 Web API로 보낸다: 재생/일시정지(`PUT /me/player/play`·`pause`), 이전·다음 곡(`POST /me/player/previous`·`next`), 5초 탐색(`PUT /me/player/seek`), 셔플(`PUT /me/player/shuffle`), 반복(`PUT /me/player/repeat`, none/playlist/track → off/context/track). 누른 뒤 0.4초 뒤에 다시 조회한다. 실패하면 위젯 앞으로 결과를 남긴다(예: `Spotify Premium required`, `No active Spotify device`).
-- 토큰이 거부되면(401) 한 번 갱신해 다시 부른다. 앨범 아트는 곡이 바뀔 때만 받는다(가로 200px 이상 중 가장 작은 이미지, 2MB 이하).
+- 토큰이 거부되면(401) 한 번 갱신해 다시 부른다. 앨범 아트는 곡이 바뀔 때만 받는다(가로 200px 이상 중 가장 작은 이미지, 2MB 이하). 이때 아트의 대표 색(채도가 높은 픽셀에 가중치를 준 평균)도 계산한다.
+- 곡이 바뀔 때마다 좋아요 여부(`GET /me/library/contains`)와 대기열(`GET /me/player/queue`, 최대 20곡)을 다시 묻는다. 재생 기기 이름은 `/me/player`에서 함께 온다.
+- 위젯 전용 요청(덱이 처리하며 PC에는 가지 않는다): `spotify.queue`(대기열 새로 받기), `spotify.devices`(Spotify Connect 기기 목록, `GET /me/player/devices`), `spotify.transfer`(`{"id"}`. 고른 기기로 재생 옮기기, `PUT /me/player`), `spotify.like`(`{"on"}`. 지금 곡을 라이브러리에 넣거나 빼기, `PUT`·`DELETE /me/library`). 기기 ID와 곡 URI는 경로와 쿼리에 들어가므로 형식(영문자·숫자, 22자리 ID)을 검사한다.
+- 개발 모드에서 재생목록의 곡 목록은 내가 만든 재생목록만 볼 수 있어서, 덱은 재생목록 대신 대기열만 보여 준다(사용자 결정).
 - UI에는 `spotify` 메시지로 보낸다(03의 3.16절 "데몬–UI 통신 프로토콜"). 재생 위치는 UI가 스스로 진행시키므로 곡·상태가 같고 위치가 예상과 2초 안으로 맞으면 다시 보내지 않는다(30초마다는 보낸다).
 
 ### 관련 코드와 검증

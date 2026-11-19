@@ -645,7 +645,8 @@ UI와 데몬을 합친 프로그램 전체는 "스트림덱 앱"으로 부른다
 
 | 앱 | 위젯 종류 | 배치 위치 | 설정 항목 | 동작 |
 |---|---|---|---|---|
-| `Media` | `media.player` | 페이지, 4×2 | 대상(`Source`): PC(미지정 시 연결된 첫 PC) 또는 `Spotify` | 재생 곡 앨범 아트·메타데이터, 진행 바, 7개 버튼(반복, 이전 곡, 5초 뒤로, 재생·일시정지, 5초 앞으로, 다음 곡, 셔플). `Spotify`를 고르면 덱이 Spotify 계정을 직접 조회하고 제어한다([04-host-link.md](04-host-link.md) 4.15절 "Spotify") |
+| `Media` | `media.player` | 페이지, 4×2 | 대상(`Source`): PC(미지정 시 연결된 첫 PC) 또는 `Spotify` | 재생 곡 앨범 아트·메타데이터, 진행 바, 7개 버튼(반복, 이전 곡, 5초 뒤로, 재생·일시정지, 5초 앞으로, 다음 곡, 셔플). `Spotify`를 고르면 덱이 Spotify 계정을 직접 조회하고 제어한다([04-host-link.md](04-host-link.md) 4.15절 "Spotify"). Spotify가 대상이면 키가 좋아요 / 셔플 / 이전 / 재생 / 다음 / 반복 / 대기열로 바뀌고(5초 탐색 대신 좋아요와 대기열), 다음 곡과 재생 기기 이름이 표시된다. 기기 줄을 누르면 기기 목록, 대기열 키를 누르면 대기열 창이 뜬다(`shell/SpotifySheet`). `Spotify theme`을 켜면 덱의 하드웨어풍 테마 대신 Spotify 앱의 재생 화면처럼 그린다(`widgets/SpotifyPlayer`, 아래 "Spotify 플레이어") |
+| `Media` | `media.combo` (PC + Spotify) | 페이지, 4×2 | 대상 PC | 평소에는 그 PC의 미디어 위젯이다. 그 PC가 Spotify를 재생 중이면(덱이 조회한 Spotify에 곡이 있고, PC 플레이어 이름이 `spotify`로 시작하거나 곡 제목이 같으면) Spotify로 바뀌고 버튼도 Spotify로 보낸다. `Spotify theme`(이 위젯은 처음부터 켜짐)이 켜져 있으면 Spotify 플레이어(`widgets/SpotifyPlayer`)로, 꺼져 있으면 덱 테마의 미디어 위젯에서 Spotify 기능만 쓰는 모양으로 바뀐다. 곡이 바뀔 때의 짧은 어긋남 때문에 PC 화면으로 돌아갈 때는 6초 기다린다(`shell/WidgetSlot`). 이 위젯이 있으면 덱이 Spotify를 조회한다 |
 | `Resource monitor` | `monitor.2x1`, `monitor.2x2`, `monitor.4x1`, `monitor.4x2` | 페이지, 이름과 동일한 크기 | 대상 장치(덱 자신 또는 PC), 표시 메트릭(크기별 최대 3·6·6·12개) | 리소스 사용량 미터 (아래 "리소스 미터") |
 | `Command` | `command.run` | 랙 슬롯 | PC, 해당 PC에 등록된 명령, 라벨, 색상 | 버튼: 탭 시 명령 1개 실행 |
 | | `command.switch` | 랙 슬롯 | 위와 동일 | 스위치 버튼: 온/오프 전환. 상태는 PC가 보고 |
@@ -655,6 +656,7 @@ UI와 데몬을 합친 프로그램 전체는 "스트림덱 앱"으로 부른다
 | | `web.icon` | 랙 슬롯 | 위와 동일 | 아이콘 버튼(`Icon`): `web.button`과 같되 버튼 윗면에 사이트 아이콘을 그린다 |
 
 - **명령 위젯 4종은 PC에 등록된 명령 1개를 가리킨다.** 실행 내용, 단계/범위, 현재 상태는 모두 PC가 관리한다. 덱은 위젯 추가 시 골라 매핑만 한다([04-host-link.md](04-host-link.md) 4.6절 "명령").
+- **Spotify 플레이어**(`widgets/SpotifyPlayer`): 사용자 요청으로 이 위젯만 덱의 디자인 규칙(위젯 틀, 나사, 디스플레이, 돌출 버튼, 직각 모서리)을 따르지 않는다. 둥근 어두운 카드에 앨범 아트의 대표 색에서 Spotify 검정(#121212)으로 이어지는 그라데이션을 깔고, 흰 굵은 제목, 회색 아티스트, 초록 재생 기기 줄, 가는 진행 막대(흰 채움과 손잡이), 틀 없는 아이콘 제어 줄(가운데 흰 원형 재생 버튼, 켜진 셔플·반복·좋아요는 초록과 아래 점)을 그린다. 기능과 보내는 액션은 Spotify 모드의 `MediaWidget`과 같다.
 - 상태가 없는 실행 버튼(`command.run`)에는 인디케이터가 없고, 온/오프 상태가 있는 스위치에는 있다. 노브는 라벨 아래에 현재 값을 표시한다.
 - 스위치는 추가할 때 인디케이터 색상(`Light`)을 고를 수 있다: `AUTO`(버튼 색상에 맞춤: 빨간 버튼은 빨강, 주황 버튼은 주황, 나머지는 초록), 초록, 주황, 빨강, 파랑. 위젯 설정의 `light`에 저장된다(`Theme.indicatorColors`). 이미 놓은 위젯의 설정은 바꿀 수 없으므로, 색상을 바꾸려면 위젯을 지우고 다시 추가한다.
 - UI 구현은 위젯 종류별로 `src/app/ui/widgets/` 아래 파일이 대응된다: `MediaWidget`, `MeterWidget`(리소스 미터 4종 공용), `CommandWidget`, `CommandSwitchWidget`, `CommandSteppedWidget`, `CommandLinearWidget`(명령 위젯 4종 공통 베이스 `CommandBase`). 종류와 QML 파일 매핑은 `shell/WidgetSlot`의 `sources`에 정의돼 있다.
@@ -764,7 +766,7 @@ UI와 데몬을 합친 프로그램 전체는 "스트림덱 앱"으로 부른다
 | 방향 | 메시지 | 의미 |
 |---|---|---|
 | 데몬 → UI | `hello` | 접속 직후 1회. 데몬 버전 |
-| 데몬 → UI | `catalog` | 접속 직후 1회. 추가 가능한 앱과 앱별 위젯 종류(배치 형태 `form`: 페이지용 `widget` vs 랙 슬롯용 `button`, 크기, 설정 항목과 타입 `host`·`command`·`metrics`·`text`·`url`·`color`·`light`. `host`에 `own`이 있으면 덱 자신 선택 가능, `command`에는 선택 가능한 명령 종류 `filter`, `metrics`에는 최대 개수 `max` 포함) |
+| 데몬 → UI | `catalog` | 접속 직후 1회. 추가 가능한 앱과 앱별 위젯 종류(배치 형태 `form`: 페이지용 `widget` vs 랙 슬롯용 `button`, 크기, 설정 항목과 타입 `host`·`command`·`metrics`·`text`·`url`·`color`·`light`·`flag`(켜기/끄기, 처음 값은 `initial`). `when_host`가 있으면 그 대상을 골랐을 때만 보이는 설정이다. `host`에 `own`이 있으면 덱 자신 선택 가능, `command`에는 선택 가능한 명령 종류 `filter`, `metrics`에는 최대 개수 `max` 포함) |
 | 데몬 → UI | `layout` | 레이아웃 상태. 접속 직후 및 변경 시마다 전송. 그리드 크기(`cols`×`rows`)와 페이지별 랙 목록(라벨, 타일 좌표·크기, 내부 버튼 위젯들) 및 복합 위젯 목록. 위젯마다 종류(`kind`), 타일 좌표·크기, 라벨, 버튼 색, 위젯 설정(`settings`) 포함 |
 | UI → 데몬 | `layout_move`, `layout_resize`, `layout_rename`, `layout_add`, `layout_put`, `layout_remove`, `layout_tidy`, `layout_reset` | 레이아웃 편집 명령(편집 모드): 이동, 랙 크기 조절, 랙 이름 변경, 페이지에 추가, 랙 슬롯에 버튼 추가, 삭제, 빈 페이지 정리, 기본 레이아웃 복구. 데몬은 유효성 검증 통과 시에만 저장하고 새 `layout`을 브로드캐스트한다. 거절되거나 잘못된 `layout_*` 메시지 수신 시 현재 `layout`을 재전송해 동기화한다 |
 | UI → 데몬 | `action` | 호스트 액션 실행 요청 (`host`, `name`, `args`). `host`가 비어 있으면 연결된 첫 호스트로 라우팅된다. `widget`에 위젯 ID를 넘기면 실행 결과가 `result`로 돌아온다. 전송 불가 시(대상 호스트 미연결) 즉시 실패(`no_host`) 반환 |
@@ -786,7 +788,7 @@ UI와 데몬을 합친 프로그램 전체는 "스트림덱 앱"으로 부른다
 | 데몬 → UI | `vault` | 덱 금고 상태: 서비스별 키 보관 여부(`registered`), 토큰 갱신 가능 여부(`linked`), 금고를 쓰도록 허용한 호스트(`hosts`), 화면에서 허용 여부를 묻는 중인 요청(`asking`. 없으면 `null`). 키 값은 오지 않는다 |
 | UI → 데몬 | `vault_answer`, `vault_revoke`, `vault_forget` | `asking`에 답하기(`allow`), 호스트의 금고 사용 허용 해제(`service`, `host`), 서비스 키와 토큰 삭제(`service`) |
 | 데몬 → UI | `icons` | 웹페이지 아이콘 버튼이 표시할 사이트 아이콘(주소 → `data:` URI). 가져오지 못한 주소는 빠진다. 변경 시 전체 전송 |
-| 데몬 → UI | `spotify` | 덱이 직접 조회하는 Spotify 계정의 재생 상태: 승인 여부(`linked`), 마지막 조회 성공 여부(`live`), 재생 정보(`media`, 형식은 호스트의 것과 같음), 앨범 아트(`art`), 실패 사유(`error`). UI(`DaemonLink`)는 이것을 호스트와 같은 모양(`id: "@spotify"`)으로 바꿔 미디어 위젯에 넘긴다. 그 위젯의 액션은 `host: "@spotify"`로 보내며 덱이 처리한다 |
+| 데몬 → UI | `spotify` | 덱이 직접 조회하는 Spotify 계정의 재생 상태: 승인 여부(`linked`), 마지막 조회 성공 여부(`live`), 재생 정보(`media`, 형식은 호스트의 것과 같음), 앨범 아트(`art`), 실패 사유(`error`), 재생 기기 이름(`device`), 좋아요 여부(`liked`), 대기열(`queue`), 기기 목록(`devices`), 앨범 대표 색(`color`). UI(`DaemonLink`)는 이것을 호스트와 같은 모양(`id: "@spotify"`)으로 바꿔 미디어 위젯에 넘긴다. 그 위젯의 액션은 `host: "@spotify"`로 보내며 덱이 처리한다 |
 | UI → 데몬 | `pair_start`, `pair_stop`, `pair_accept`, `pair_reject`, `host_forget` | 페어링 모드 시작·중지, 수락·거절, 페어링 삭제. `pair_accept`에는 화면에 표시된 검증 코드(`code`)를 함께 실어 보내며 현재 후보 코드와 다르면 무시한다(탭하는 순간 후보가 다른 PC로 바뀔 수 있는 경쟁 상태 방지). `pair_stop`과 `pair_reject`는 대기 중인 PC에 `rejected` 알림 전송 |
 
 호스트(PC) 측 프로토콜은 [04-host-link.md](04-host-link.md) 4.6절에 정리돼 있다.
@@ -934,6 +936,7 @@ UI (`src/app/ui/`):
 | `AddPanel`, `AddOption` | 위젯 추가 시트(앱 → 위젯 종류 → 설정) 및 설정 항목 선택 컴포넌트 |
 | `Dialog` | 중앙 모달 다이얼로그 베이스: 배경 딤머와 카드(`Dialog.Card`) |
 | `ConfirmDialog` | 확인 다이얼로그 (`ask(제목, 설명, 버튼 라벨, 액션, 색상)`) |
+| `SpotifySheet` | Spotify 창: Spotify 미디어 위젯에서 연 대기열(`UP NEXT`)이나 재생 기기(`PLAY ON`) 목록. 기기를 누르면 그 기기로 재생을 옮긴다. Spotify 플레이어(`Spotify theme`)에서 열면 Spotify 앱의 목록처럼 그린다(어두운 둥근 카드, "Now playing"·"Next in queue", 초록 지금 기기, 흰 둥근 닫기 버튼, 검은 바탕) |
 | `VaultAsk` | 덱 금고 사용 허용 다이얼로그: 허용하지 않은 PC가 금고를 쓰려 하면 데몬이 묻는 요청(`vault.asking`)을 띄운다. `ALLOW` / `DENY`(바깥 영역도 거절) |
 | `RenameDialog` | 랙 이름 변경 다이얼로그 |
 | `LinkInfo` | 인터페이스 상세 정보 시트 |
@@ -952,6 +955,7 @@ UI (`src/app/ui/`):
 | `WebBase` | 웹페이지 위젯 2종 공통 베이스: 대상 주소, 활성 여부(`ready`: PC 연결과 `web.open` 권한), 색상과 라벨, `open()` |
 | `WebButtonWidget`, `WebIconWidget` | 웹페이지 버튼, 사이트 아이콘을 그리는 웹페이지 버튼(아이콘은 `icons`에서 받음) |
 | `MediaWidget` | 미디어 제어 위젯 |
+| `SpotifyPlayer` | Spotify 플레이어 위젯: Spotify를 대상으로 `Spotify theme`을 켠 미디어 위젯. Spotify 앱의 재생 화면처럼 그린다(덱 테마를 따르지 않음) |
 | `MeterWidget` | 리소스 미터 위젯 (4종 크기 공용) |
 
 데몬 (`src/app/tossd/src/`):

@@ -13,8 +13,10 @@ fn track() -> Value {
         "shuffle_state": true,
         "repeat_state": "context",
         "actions": { "disallows": { "seeking": true } },
+        "device": { "name": "DESKTOP" },
         "item": {
             "type": "track",
+            "uri": "spotify:track:4uLU6hMCjMI75M1A2tKUQC",
             "name": "Song",
             "duration_ms": 200000,
             "artists": [{ "name": "A" }, { "name": "B" }],
@@ -121,6 +123,15 @@ fn the_worker_polls_refreshes_fetches_art_and_reports_actions() {
                 }
                 ("PUT", "/me/player/pause") => (403, "application/json", json!({ "error": { "status": 403, "message": "Player command failed: Premium required", "reason": "PREMIUM_REQUIRED" } }).to_string().into_bytes()),
                 ("POST", "/me/player/next") => (204, "text/plain", Vec::new()),
+                ("GET", "/me/library/contains?uris=spotify%3Atrack%3A4uLU6hMCjMI75M1A2tKUQC") => (200, "application/json", b"[true]".to_vec()),
+                ("DELETE", "/me/library?uris=spotify%3Atrack%3A4uLU6hMCjMI75M1A2tKUQC") => (200, "application/json", Vec::new()),
+                ("GET", "/me/player/queue") => (200, "application/json", json!({ "queue": [{ "type": "track", "name": "Next", "artists": [{ "name": "C" }] }] }).to_string().into_bytes()),
+                ("GET", "/me/player/devices") => (200, "application/json", json!({ "devices": [
+                    { "id": "abc123", "name": "DESKTOP", "type": "Computer", "is_active": true },
+                    { "id": "bad/id", "name": "X", "type": "Speaker" },
+                    { "id": "def456", "name": "Locked", "type": "TV", "is_restricted": true }
+                ] }).to_string().into_bytes()),
+                ("PUT", "/me/player") => (204, "text/plain", Vec::new()),
                 ("GET", "/art.jpg") => (200, "image/jpeg", vec![0xff, 0xd8, 0xff, 0xe0]),
                 _ => (404, "text/plain", Vec::new()),
             }
@@ -156,22 +167,76 @@ fn the_worker_polls_refreshes_fetches_art_and_reports_actions() {
     let art = got.art.expect("앨범 아트가 없음");
     assert_eq!((art.mime.as_str(), art.data.as_str(), got.media.unwrap().art), ("image/jpeg", "/9j/4A==", art.id.clone()));
     assert_eq!(*refreshed.lock().unwrap(), 1, "거부된 토큰을 갱신하지 않음");
+    let until = Instant::now() + Duration::from_secs(5);
+    let got = loop {
+        if let Some(st) = states.lock().unwrap().iter().rev().find(|s| s.liked.is_some() && !s.queue.is_empty()).cloned() {
+            break st;
+        }
+        assert!(Instant::now() < until, "좋아요·대기열이 오지 않음: {:?}", states.lock().unwrap().last());
+        thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!((got.device.as_str(), got.liked, got.queue.clone()), ("DESKTOP", Some(true), vec![Track { title: "Next".into(), artist: "C".into() }]));
 
     tx.send(Cmd::Act { name: ACTION_MEDIA_PLAY_PAUSE.into(), args: Value::Null, widget: Some(7) }).unwrap();
     tx.send(Cmd::Act { name: ACTION_MEDIA_NEXT.into(), args: Value::Null, widget: Some(8) }).unwrap();
+    tx.send(Cmd::Act { name: ACTION_DEVICES.into(), args: Value::Null, widget: Some(9) }).unwrap();
+    tx.send(Cmd::Act { name: ACTION_TRANSFER.into(), args: json!({ "id": "abc123" }), widget: Some(10) }).unwrap();
+    tx.send(Cmd::Act { name: ACTION_TRANSFER.into(), args: json!({ "id": "../me" }), widget: Some(11) }).unwrap();
+    tx.send(Cmd::Act { name: ACTION_LIKE.into(), args: json!({ "on": false }), widget: Some(12) }).unwrap();
     let until = Instant::now() + Duration::from_secs(5);
-    while results.lock().unwrap().len() < 2 && Instant::now() < until {
+    while results.lock().unwrap().len() < 6 && Instant::now() < until {
         thread::sleep(Duration::from_millis(20));
     }
-    assert_eq!(*results.lock().unwrap(), [(7, false, "Spotify Premium required".to_string()), (8, true, String::new())]);
+    assert_eq!(
+        *results.lock().unwrap(),
+        [
+            (7, false, "Spotify Premium required".to_string()),
+            (8, true, String::new()),
+            (9, true, String::new()),
+            (10, true, String::new()),
+            (11, false, "Bad device".to_string()),
+            (12, true, String::new())
+        ]
+    );
+    let last = states.lock().unwrap().iter().rev().find(|s| !s.devices.is_empty()).cloned().expect("기기 목록이 오지 않음");
+    assert_eq!(last.devices, vec![Device { id: "abc123".into(), name: "DESKTOP".into(), kind: "Computer".into(), active: true }], "형식이 틀리거나 제어할 수 없는 기기를 넣음");
+    assert_eq!(states.lock().unwrap().last().unwrap().liked, Some(false));
     let log = seen.lock().unwrap().clone();
     assert!(log.iter().any(|(m, p, a)| m == "GET" && p.starts_with("/me/player?additional_types=") && a == "Bearer T2"), "{log:?}");
     assert!(log.iter().any(|(m, p, _)| m == "PUT" && p == "/me/player/pause"), "{log:?}");
+    assert_eq!(log.iter().filter(|(m, p, _)| m == "PUT" && p == "/me/player").count(), 1, "형식이 틀린 기기로 옮김: {log:?}");
 
     tx.send(Cmd::Want(false)).unwrap();
     let until = Instant::now() + Duration::from_secs(2);
     while states.lock().unwrap().last().is_some_and(|s| s.media.is_some()) && Instant::now() < until {
         thread::sleep(Duration::from_millis(20));
     }
-    assert_eq!(states.lock().unwrap().last().unwrap(), &SpotifyState { linked: true, ..SpotifyState::default() });
+    let idle = states.lock().unwrap().last().unwrap().clone();
+    assert!(idle.linked && idle.media.is_none() && idle.queue.is_empty() && idle.liked.is_none(), "{idle:?}");
+}
+
+#[test]
+fn uris_and_device_ids_are_checked_before_use() {
+    assert!(library_uri("spotify:track:4uLU6hMCjMI75M1A2tKUQC") && library_uri("spotify:episode:4uLU6hMCjMI75M1A2tKUQC"));
+    assert!(!library_uri("spotify:track:4uLU6hMCjMI75M1A2tKUQ&") && !library_uri("spotify:album:4uLU6hMCjMI75M1A2tKUQC") && !library_uri(""));
+    assert!(device_id("0d1841b0976bae2a3a310dd74c0f3df354899bc8") && !device_id("a b") && !device_id(""));
+    let q = queue_from(&json!({ "queue": [{ "type": "episode", "name": "Ep", "show": { "name": "Show" } }, { "name": null }] }));
+    assert_eq!(q, vec![Track { title: "Ep".into(), artist: "Show".into() }]);
+}
+
+#[test]
+fn the_main_color_leans_to_the_vivid_part_of_the_cover() {
+    let mut img = image::RgbImage::from_pixel(8, 8, image::Rgb([128, 128, 128]));
+    for x in 0..4 {
+        for y in 0..8 {
+            img.put_pixel(x, y, image::Rgb([30, 215, 96]));
+        }
+    }
+    let mut png = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut png, image::ImageFormat::Png).unwrap();
+    let c = main_color(png.get_ref()).unwrap();
+    let g = u8::from_str_radix(&c[3..5], 16).unwrap();
+    let r = u8::from_str_radix(&c[1..3], 16).unwrap();
+    assert!(c.len() == 7 && g > 160 && r < 90, "{c}");
+    assert!(main_color(b"not an image").is_none());
 }

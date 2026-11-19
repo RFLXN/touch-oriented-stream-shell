@@ -10,6 +10,11 @@
 //   metrics, metricValues, meterSource   자원 미터 대상 호스트의 메트릭 목록, 현재 값, 소스 이름 및 실시간 수신 여부
 //   icons         사이트 아이콘(주소 -> `data:` URI). 웹페이지 아이콘 버튼(`web.icon`)에만 넣는다
 // 위젯이 요청한 액션(`action`)은 대상 호스트 ID 및 위젯 ID와 함께 데몬으로 전송된다(`link.action`).
+// 미디어 위젯의 대상이 Spotify이고 `spotify_theme`이 켜져 있으면 `MediaWidget` 대신 `widgets/SpotifyPlayer`를 로드한다.
+// PC+Spotify 위젯(`media.combo`)은 평소에는 고른 PC의 `MediaWidget`이고, 그 PC가 Spotify를 재생 중이면 `SpotifyPlayer`로 바뀐다
+// (덱이 조회한 Spotify에 곡이 있고, PC 플레이어 이름이 `spotify`로 시작하거나 곡 제목이 같을 때). 이때 `host`와 액션 대상도 Spotify(`"@spotify"`)가 된다.
+// 이 위젯의 `spotify_theme`이 꺼져 있으면 `SpotifyPlayer` 대신 Spotify 모드의 `MediaWidget`으로 바뀐다(설정이 없는 위젯은 켜진 것으로 본다).
+// 곡이 바뀌는 순간 PC와 Spotify의 정보가 잠깐 어긋날 수 있어서, Spotify에서 PC로 돌아갈 때는 `comboHold` 동안 기다린다.
 //
 // 호스트 선택 규칙: `widget.settings.host`에 호스트 ID가 지정되어 있으면 해당 호스트만 사용한다
 // (미연결 상태면 `null`). 비어 있으면 연결된 첫 번째 호스트(`link.host`)를 사용하며, 액션도 그 호스트로 전달된다.
@@ -38,6 +43,7 @@ Loader {
         "command.stepped": "../widgets/CommandSteppedWidget.qml",
         "command.linear": "../widgets/CommandLinearWidget.qml",
         "media.player": "../widgets/MediaWidget.qml",
+        "media.combo": "../widgets/MediaWidget.qml",
         "monitor.2x1": "../widgets/MeterWidget.qml",
         "monitor.2x2": "../widgets/MeterWidget.qml",
         "monitor.4x1": "../widgets/MeterWidget.qml",
@@ -74,7 +80,34 @@ Loader {
         return { own: false, name: "", live: false }
     }
 
-    source: sources[widget.kind] ? Qt.resolvedUrl(sources[widget.kind]) : ""
+    readonly property var spotify: link ? link.spotify : null
+    readonly property bool comboMatch: {
+        if (widget.kind !== "media.combo" || !shownHost || !shownHost.media || !spotify || !spotify.connected || !spotify.media)
+            return false
+        const pc = shownHost.media, sp = spotify.media
+        const same = (a, b) => !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase()
+        return (pc.player || "").toLowerCase().startsWith("spotify") || same(pc.title, sp.title)
+    }
+    property bool comboSpotify: false
+    readonly property int comboHold: 6000
+    onComboMatchChanged: {
+        if (comboMatch) {
+            comboBack.stop()
+            comboSpotify = true
+        } else if (comboSpotify) {
+            comboBack.restart()
+        }
+    }
+    Component.onCompleted: comboSpotify = comboMatch
+    Timer {
+        id: comboBack
+        interval: slot.comboHold
+        onTriggered: slot.comboSpotify = slot.comboMatch
+    }
+    readonly property string actionHost: comboSpotify && widget.kind === "media.combo" ? "@spotify" : wantedHost
+    readonly property bool spotifyFace: (widget.kind === "media.player" && wantedHost === "@spotify" && !!widget.settings && widget.settings.spotify_theme === true)
+        || (widget.kind === "media.combo" && comboSpotify && !(widget.settings && widget.settings.spotify_theme === false))
+    source: spotifyFace ? Qt.resolvedUrl("../widgets/SpotifyPlayer.qml") : sources[widget.kind] ? Qt.resolvedUrl(sources[widget.kind]) : ""
     onSourceChanged: {
         if (widget.kind && !sources[widget.kind])
             console.warn("알 수 없는 위젯 종류:", widget.kind, "(위젯", widget.id + ")")
@@ -82,7 +115,7 @@ Loader {
 
     Binding { target: slot.item; property: "widget"; value: slot.widget; when: slot.status === Loader.Ready }
     Binding { target: slot.item; property: "sys"; value: slot.sys; when: slot.status === Loader.Ready }
-    Binding { target: slot.item; property: "host"; value: slot.shownHost; when: slot.status === Loader.Ready }
+    Binding { target: slot.item; property: "host"; value: slot.actionHost === "@spotify" && slot.widget.kind === "media.combo" ? slot.spotify : slot.shownHost; when: slot.status === Loader.Ready }
     Binding { target: slot.item; property: "value"; value: slot.shownValue; when: slot.status === Loader.Ready }
     Binding { target: slot.item; property: "metrics"; value: slot.meters[slot.meterKey] || []; when: slot.status === Loader.Ready }
     Binding { target: slot.item; property: "metricValues"; value: slot.meterValues[slot.meterKey] || slot.noValues; when: slot.status === Loader.Ready }
@@ -93,7 +126,7 @@ Loader {
         target: slot.item
         function onAction(name, args) {
             if (slot.link)
-                slot.link.action(name, args, slot.wantedHost, slot.widget.id)
+                slot.link.action(name, args, slot.actionHost, slot.widget.id)
         }
     }
 }

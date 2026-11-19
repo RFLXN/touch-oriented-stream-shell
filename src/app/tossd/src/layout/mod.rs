@@ -50,6 +50,10 @@ pub enum Kind {
     /// 미디어 플레이어(앨범 아트, 곡 정보, 재생 제어 키 7개)
     #[serde(rename = "media.player")]
     MediaPlayer,
+    /// PC와 Spotify를 오가는 미디어 플레이어: 평소에는 PC의 미디어 위젯이고, 그 PC가 Spotify를 재생 중이면(덱이 조회한 Spotify의 곡과
+    /// 같으면) Spotify 플레이어로 바뀐다. 판별과 전환은 UI가 한다(`shell/WidgetSlot`). 이 위젯이 있으면 덱이 Spotify를 조회한다.
+    #[serde(rename = "media.combo")]
+    MediaCombo,
     /// 자원 미터: 선택한 호스트(페어링된 PC 또는 덱 자신)의 시스템 자원을 표시한다. 4가지 크기가 있으며 최대 미터 수가 다르다
     /// (2x1은 3개, 2x2와 4x1은 6개, 4x2는 12개).
     #[serde(rename = "monitor.2x1")]
@@ -88,7 +92,7 @@ impl Kind {
 
     /// 복합 위젯 여부(true면 랙과 동등하게 페이지에 직접 배치, false면 랙 내부 칸에만 배치 가능한 버튼 위젯).
     pub fn is_composite(self) -> bool {
-        matches!(self, Kind::MediaPlayer) || self.meters() > 0
+        matches!(self, Kind::MediaPlayer | Kind::MediaCombo) || self.meters() > 0
     }
 
     /// 자원 미터 위젯이면 최대 미터 수를, 아니면 0을 반환한다.
@@ -179,9 +183,9 @@ impl Layout {
         out
     }
 
-    /// 배치에 Spotify를 대상으로 고른 미디어 플레이어 위젯이 있는지 여부(있을 때만 덱이 Spotify를 조회한다)
+    /// 배치에 Spotify를 대상으로 고른 미디어 플레이어 위젯이나 PC+Spotify 위젯이 있는지 여부(있을 때만 덱이 Spotify를 조회한다)
     pub fn wants_spotify(&self) -> bool {
-        self.pages.iter().flat_map(|p| &p.widgets).any(|w| w.kind == Kind::MediaPlayer && w.settings.get("host").and_then(Value::as_str) == Some(crate::spotify::SOURCE))
+        self.pages.iter().flat_map(|p| &p.widgets).any(|w| w.kind == Kind::MediaCombo || (w.kind == Kind::MediaPlayer && w.settings.get("host").and_then(Value::as_str) == Some(crate::spotify::SOURCE)))
     }
 
     /// 아이콘을 표시하는 웹페이지 버튼(`web.icon`)들의 주소(중복 제거)

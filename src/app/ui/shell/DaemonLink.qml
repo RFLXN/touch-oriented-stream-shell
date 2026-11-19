@@ -7,8 +7,8 @@
 //   connected     WebSocket 연결 상태
 //   daemonVersion 데몬 버전(`hello`)
 //   catalog       추가 가능한 앱 및 위젯 카탈로그  [{"id":..,"title":..,"about":..,"widgets":[{"kind":..,"title":..,"about":..,
-//                 "form":"widget|button","w":..,"h":..,"label":..,"settings":[{"key":..,"title":..,"about":..,"type":"host|command|metrics|text|url|color|light",
-//                 "required":..,"filter":..,"own":..,"spotify":..,"max":..}]}]}]   (`shell/AddPanel`에서 사용)
+//                 "form":"widget|button","w":..,"h":..,"label":..,"settings":[{"key":..,"title":..,"about":..,"type":"host|command|metrics|text|url|color|light|flag",
+//                 "required":..,"filter":..,"own":..,"spotify":..,"max":..,"when_host":..,"initial":..}]}]}]   (`shell/AddPanel`에서 사용)
 //   sys           시스템 상태  {"host":..,"ip":..,"links":{"usb":..,"eth":..,"wlan":..},
 //                              "net":{"usb":{"name":..,"up":..,"mac":..,"addr":..},"eth":{..},"wlan":{..},"usb_state":..,"eth_speed":..,"bt_present":..}}
 //   cols, rows    페이지 그리드 크기(4x6)
@@ -41,7 +41,11 @@
 //   icons         사이트 아이콘  {"<주소>":"data:image/png;base64,.."}  — 웹페이지 아이콘 버튼이 표시한다(가져오지 못한 주소는 없음)
 //   spotify       덱이 직접 조회하는 Spotify 계정. 미디어 위젯이 호스트처럼 쓸 수 있게 호스트와 같은 모양으로 바꿔 둔다:
 //                 {"id":"@spotify","name":"Spotify","connected":..,"linked":..,"caps":[..],"media":..,"art":..,
-//                  "offline":"<연결되지 않았을 때 보여 줄 문장. 연결되어 있으면 빈 문자열>"}
+//                  "offline":"<연결되지 않았을 때 보여 줄 문장. 연결되어 있으면 빈 문자열>",
+//                  "extra":{"device":..,"liked":..,"queue":[{"title":..,"artist":..}],"devices":[{"id":..,"name":..,"kind":..,"active":..}],"color":"#rrggbb"}}
+//   spotifyView   화면에 띄운 Spotify 창(`"queue"` / `"devices"` / 빈 문자열). 위젯이 `spotify.queue`·`spotify.devices`를 보내면 열린다
+//                 (같은 요청으로 덱이 최신 목록을 받아 온다). 닫을 때는 빈 문자열로 되돌린다(`shell/SpotifySheet`)
+//   spotifyThemed 그 창을 연 위젯이 Spotify 플레이어(`Spotify theme`)인지 여부. 요청 인자의 `themed`로 받는다(데몬은 이 인자를 쓰지 않는다)
 // 송신 메서드:
 //   action(name, args, hostId, widget)   호스트에 액션 전송. `name`은 `"media.play_pause"` 등(`src/app/proto`의 `ACTION_*`), `args`는 인자 객체.
 //                                        `hostId`가 비어 있으면 연결된 첫 번째 호스트로 전송한다. `widget`(위젯 ID)을 넘기면 결과가 `results`로 돌아온다.
@@ -89,6 +93,8 @@ Item {
     property var vault: ({ services: [], asking: null })
     property var icons: ({})
     property var spotify: null
+    property string spotifyView: ""
+    property bool spotifyThemed: false
     readonly property var host: {
         for (const h of hosts)
             if (h.connected)
@@ -125,6 +131,10 @@ Item {
     function layoutTidy() { send({ type: "layout_tidy" }) }
     function layoutReset() { send({ type: "layout_reset" }) }
     function action(name, args, hostId, widget) {
+        if (hostId === "@spotify" && (name === "spotify.queue" || name === "spotify.devices")) {
+            spotifyThemed = !!(args && args.themed)
+            spotifyView = name === "spotify.queue" ? "queue" : "devices"
+        }
         const m = { type: "action", host: hostId || "", name: name, args: args || null }
         if (widget)
             m.widget = widget
@@ -166,7 +176,8 @@ Item {
                 link.spotify = {
                     id: "@spotify", name: "Spotify", connected: m.live, linked: m.linked,
                     offline: !m.linked ? "Link Spotify in toss-connector console" : m.live ? "" : (m.error || "Waiting for Spotify"),
-                    caps: m.live ? ["media.info", "media.control"] : [], media: m.media, art: m.art
+                    caps: m.live ? ["media.info", "media.control"] : [], media: m.media, art: m.art,
+                    extra: { device: m.device, liked: m.liked, queue: m.queue || [], devices: m.devices || [], color: m.color }
                 }
                 break
             case "result":

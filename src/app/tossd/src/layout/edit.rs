@@ -87,6 +87,7 @@ fn relocate<T>(pages: &mut [Page], items: fn(&mut Page) -> &mut Vec<T>, found: i
 ///   metrics      메트릭 ID 목록(`metric_ids`: 빈 값, 길이 초과, 중복 제외 후 최대 개수까지)
 ///   text, color, light  앞뒤 공백 제거 후 길이 초과 또는 제어 문자가 있으면 빈 문자열로 처리
 ///   url          앞뒤 공백 제거 후 웹페이지 주소(`web_url`)가 아니면 버림
+///   flag         불리언만 받고 그 밖의 값은 버림
 ///   그 외        문자열 그대로 유지하되 길이 초과 또는 제어 문자가 있으면 버림
 /// 필수 항목이 빠졌거나 비어 있으면 오류를 반환한다.
 fn pick_settings(info: &KindInfo, given: &Map<String, Value>) -> Result<Map<String, Value>, String> {
@@ -102,6 +103,7 @@ fn pick_settings(info: &KindInfo, given: &Map<String, Value>) -> Result<Map<Stri
                 Some(Value::String(text.to_string()))
             }
             "url" => value.as_str().map(str::trim).filter(|t| web_url(t)).map(|t| Value::String(t.to_string())),
+            "flag" => value.as_bool().map(Value::Bool),
             _ => value.as_str().filter(|t| t.len() <= SETTING_MAX && clean(t)).map(|t| Value::String(t.to_string())),
         };
         if let Some(value) = value {

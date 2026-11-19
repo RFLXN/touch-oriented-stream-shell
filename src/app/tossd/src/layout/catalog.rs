@@ -51,6 +51,7 @@ pub struct SettingInfo {
     ///   url      웹페이지 주소(`http://` 또는 `https://`. `layout`의 `web_url`)
     ///   color    버튼 색상 이름(UI `Theme.buttonColors`)
     ///   light    인디케이터 색상 이름(UI `Theme.indicatorColors`). 비우면 버튼 색상에 맞춰 정한다(`Theme.indicatorFor`)
+    ///   flag     켜기/끄기(JSON 불리언)
     #[serde(rename = "type")]
     pub kind: &'static str,
     /// 필수 입력 여부
@@ -63,11 +64,15 @@ pub struct SettingInfo {
     pub spotify: bool,
     /// `type`이 `metrics`일 때 최대 선택 가능 개수(1부터 `max`개)
     pub max: u32,
+    /// 이 설정을 보이는 조건: 같은 위젯의 `host` 설정이 이 값일 때만(빈 문자열이면 항상). 예: `"@spotify"`
+    pub when_host: &'static str,
+    /// `type`이 `flag`일 때 처음 값(위젯을 추가할 때 켜진 상태로 시작하는지). UI도 이 설정이 없는 위젯을 이 값으로 본다
+    pub initial: bool,
 }
 
 impl SettingInfo {
     fn new(key: &'static str, title: &'static str, about: &'static str, kind: &'static str, required: bool) -> Self {
-        Self { key, title, about, kind, required, filter: "", own: false, spotify: false, max: 0 }
+        Self { key, title, about, kind, required, filter: "", own: false, spotify: false, max: 0, when_host: "", initial: false }
     }
 }
 
@@ -118,7 +123,21 @@ pub fn catalog() -> Vec<AppInfo> {
                 "Cover, track and playback keys",
                 (4, 2),
                 "MEDIA",
-                vec![SettingInfo { spotify: true, ..SettingInfo::new("host", "Source", "A paired PC, or the Spotify account linked to this deck", "host", false) }],
+                vec![
+                    SettingInfo { spotify: true, ..SettingInfo::new("host", "Source", "A paired PC, or the Spotify account linked to this deck", "host", false) },
+                    SettingInfo { when_host: crate::spotify::SOURCE, ..SettingInfo::new("spotify_theme", "Spotify theme", "Draw it like the Spotify app", "flag", false) },
+                ],
+            ),
+            KindInfo::new(
+                Kind::MediaCombo,
+                "PC + Spotify",
+                "PC media that turns into the Spotify player while the PC plays Spotify",
+                (4, 2),
+                "MEDIA",
+                vec![
+                    SettingInfo::new("host", "PC", "Which paired PC this widget shows and controls", "host", false),
+                    SettingInfo { initial: true, ..SettingInfo::new("spotify_theme", "Spotify theme", "Draw it like the Spotify app while the PC plays Spotify", "flag", false) },
+                ],
             )],
         },
         AppInfo {

@@ -68,6 +68,7 @@ QtObject {
     readonly property color displaySeam: pick("#a3a199", "#000000")
     readonly property color displayGlare: pick("#2affffff", "#13ffffff")
     readonly property color accent: "#ff5f1f"
+    readonly property color spotifyGreen: "#1ed760"
 
     readonly property color indicatorOff: pick("#aeaba4", "#3a3e44")
     readonly property color indicatorSeat: pick("#9a978f", "#0c0d0f")

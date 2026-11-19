@@ -8,6 +8,8 @@
 //   url      웹페이지 주소 입력 필드(자동 완성 없이 입력. `https://`로 시작한 채 열린다)
 //   color    버튼 색상 선택
 //   light    인디케이터 색상 선택(`AUTO`는 빈 값: 버튼 색상에 맞춘다)
+//   flag     켜기/끄기 선택(`Off` / `On` 행)
+// `when_host`가 있는 설정은 위에서 고른 대상(`host`)이 그 값일 때만 보인다(예: Spotify를 고른 미디어 위젯의 `Spotify theme`).
 // 현재 선택 상태는 상위 `panel.chosen`에 보관되며, 여기서는 표시 및 선택 이벤트(`panel.chooseFor`, `panel.toggleMetric`, `panel.choose`)를 전달한다.
 // `leave()`는 텍스트 입력 필드의 포커스와 조합 중인 문자를 정리한다(패널 닫힘 또는 ADD 클릭 시 호출).
 import QtQuick
@@ -17,6 +19,7 @@ SettingsSection {
     id: option
     required property var modelData
     property var panel: null
+    visible: !modelData.when_host || chosen.host === modelData.when_host
 
     readonly property var chosen: panel ? panel.chosen : ({})
     readonly property var picked: modelData.type === "metrics" ? chosen[modelData.key] || [] : []
@@ -32,6 +35,8 @@ SettingsSection {
         }
         if (modelData.type === "command")
             return commandsOf(chosen.host || "", modelData.filter).map((c) => ({ value: c.id, title: c.name, note: shapeOf(c) }))
+        if (modelData.type === "flag")
+            return [{ value: false, title: "Off", note: "" }, { value: true, title: "On", note: modelData.about }]
         return []
     }
 
