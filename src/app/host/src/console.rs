@@ -526,7 +526,11 @@ fn api(req: &Request, ctx: &Arc<Ctx>, cfg: &Config) -> ApiResult {
         ("POST", ["vault", service, "put"]) => {
             let b = body()?;
             let text = |key: &str| b[key].as_str().map(str::trim).unwrap_or_default().to_string();
-            let fields = json!({ "client_id": text("client_id"), "client_secret": text("client_secret"), "redirect_uri": text("redirect_uri") });
+            let mut redirect = text("redirect_uri");
+            if *service == toss_proto::SERVICE_SPOTIFY && redirect.is_empty() {
+                redirect = crate::spotify::callback_uri(ctx.port);
+            }
+            let fields = json!({ "client_id": text("client_id"), "client_secret": text("client_secret"), "redirect_uri": redirect });
             crate::vault::ask(toss_proto::VAULT_PUT, service, fields).map_err(|e| (409, e))?;
             done()
         }

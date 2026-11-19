@@ -395,6 +395,7 @@ const discordSteps = {
 };
 
 function drawLinks() {
+  drawSpotify(state.vault);
   const v = state.vault, job = state.discord;
   const s = v && v.services.find((x) => x.id === "discord");
   const busy = job.phase === "deck" || job.phase === "discord";
@@ -419,7 +420,6 @@ function drawLinks() {
     : job.phase === "done" ? "인증됨: " + job.who.name + (job.who.expires ? " · 토큰 만료 " + job.who.expires : "") : job.error;
   p.append(h("p", { class: job.phase === "failed" ? "error" : "note" }, text));
   if (!busy) p.append(h("div", { class: "keys" }, h("button", { class: "key small", onclick: () => act("POST", "/api/discord/clear") }, "닫기")));
-  drawSpotify(v);
 }
 
 function drawSpotify(v) {
