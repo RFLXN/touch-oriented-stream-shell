@@ -270,6 +270,14 @@ impl Shared {
         self.refresh_device();
     }
 
+    /// 화면 테마를 바꾸고 저장한 뒤 UI 클라이언트에 알린다.
+    pub fn set_look(&self, dark: Option<bool>, glass: Option<bool>) {
+        if let Err(e) = self.device.set_look(dark, glass) {
+            eprintln!("device: {e}");
+        }
+        self.refresh_device();
+    }
+
     pub fn power_off(&self) {
         match self.device.power_off() {
             Ok(()) => eprintln!("device: 전원 종료 요청(UI)"),

@@ -1,0 +1,20 @@
+USB2 PHY(OTG 포트): 충전기 감지가 전용 충전기(DCP)로 판정해도 PHY를 켜고 장치 모드(B_PERIPHERAL)로 들어간다.
+
+덱이 켜진 상태에서 PC에 Micro USB를 꽂으면, PHY가 꺼진(suspend) 상태에서 충전기 감지가 돌아 PC를 DCP로 잘못 판정한다.
+원래 드라이버는 DCP면 데이터 통신이 없다고 보고 PHY를 끈 채로 두므로, 재부팅 전까지 PC가 덱을 인식하지 못했다
+(부팅 시 꽂혀 있던 케이블은 SDP로 맞게 판정된다).
+덱의 OTG 포트는 PC에 붙는 장치로만 쓰므로 DCP여도 PHY를 켜 둔다. 진짜 충전기라면 호스트가 없어 아무 일도 일어나지 않고,
+케이블을 빼면 B_PERIPHERAL 상태의 VBUS 확인이 PHY를 끈다.
+
+--- a/drivers/phy/rockchip/phy-rockchip-inno-usb2.c
++++ b/drivers/phy/rockchip/phy-rockchip-inno-usb2.c
+@@ -705,7 +705,8 @@
+ 					break;
+ 				case POWER_SUPPLY_TYPE_USB_DCP:
+ 					dev_dbg(&rport->phy->dev, "dcp cable is connected\n");
+-					rockchip_usb2phy_power_off(rport->phy);
++					rockchip_usb2phy_power_on(rport->phy);
++					rport->state = OTG_STATE_B_PERIPHERAL;
+ 					notify_charger = true;
+ 					sch_work = true;
+ 					cable = EXTCON_CHG_USB_DCP;

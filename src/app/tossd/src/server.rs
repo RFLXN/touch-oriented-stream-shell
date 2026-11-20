@@ -119,6 +119,7 @@ fn handle(shared: &Arc<Shared>, msg: ClientMsg) {
             }
         }
         ClientMsg::Ssh { on } => shared.set_ssh(on),
+        ClientMsg::Look { dark, glass } => shared.set_look(dark, glass),
         ClientMsg::WifiScan => shared.wifi_cmd(WifiCmd::Scan),
         ClientMsg::WifiConnect { key, psk } => shared.wifi_cmd(WifiCmd::Connect { key, psk }),
         ClientMsg::WifiForget { key } => shared.wifi_cmd(WifiCmd::Forget { key }),

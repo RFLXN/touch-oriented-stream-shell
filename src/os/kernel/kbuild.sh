@@ -18,8 +18,21 @@ mk() {
     -j"$JOBS" "$@"
 }
 
+tf_add_patches() {
+  local p
+  for p in "$KDIR"/patches/*.patch; do
+    [ -e "$p" ] || continue
+    if patch -d "$KSRC" -p1 -R -s -f --dry-run <"$p" >/dev/null 2>&1; then
+      continue
+    fi
+    patch -d "$KSRC" -p1 -s -N <"$p"
+    echo "[patch] $(basename "$p")"
+  done
+}
+
 tf_add_drivers() {
   local pdir=$KSRC/drivers/gpu/drm/panel
+  tf_add_patches
   cp "$KDIR"/drivers/panel-sunmi-toss-front.c "$KDIR"/drivers/panel-sunmi-toss-front-init.h "$pdir/"
   if ! grep -q DRM_PANEL_SUNMI_TOSS_FRONT "$pdir/Makefile"; then
     echo 'obj-$(CONFIG_DRM_PANEL_SUNMI_TOSS_FRONT) += panel-sunmi-toss-front.o' >>"$pdir/Makefile"
@@ -73,4 +86,5 @@ tf_config() {
     esac
   done <"$frag"
   echo "[config] 완료 (경고 ${bad})"
+  return "$bad"
 }

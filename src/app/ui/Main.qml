@@ -8,6 +8,8 @@
 //                위젯이 들어 있는 랙 삭제 — 빈 랙과 단일 위젯은 즉시 삭제).
 //                데몬 연결이 끊기면 설정 패널, 확인 다이얼로그, 편집 모드(추가 메뉴, 이름 변경 다이얼로그)를 모두 닫고 재연결 전까지 설정을 열지 않는다
 //                (연결이 끊긴 동안에는 입력이 데몬으로 전달되지 않음).
+//                덱에 저장된 화면 테마(`device.look`)가 바뀌어 올 때마다 `Theme`에 넣는다(같은 값이 다시 오면 무시해, 토글 직후 늦게 온 이전 값이 화면을 되돌리지 않게 한다). 처음 받기 전까지는 화면을 검게 덮어 두어
+//                기본 테마가 잠깐 비쳤다가 바뀌는 일이 없게 한다(데몬이 3초 안에 답하지 않으면 기본 테마로 연다).
 //   shell/     화면 뼈대: 데몬 연결(`DaemonLink`), 상단바, 페이지/그리드(`Pager`), 랙, 위젯 슬롯(`WidgetSlot`), 설정 패널 등
 //   kit/       UI 컴포넌트: 디자인 토큰(`Theme` — 용어 및 스타일 규칙 포함), 버튼, 노브, 디스플레이, 인디케이터, 위젯 프레임 등
 //   widgets/   앱별 위젯 컴포넌트. 새 앱을 추가할 때 주로 작업하는 영역
@@ -24,6 +26,8 @@ Window {
     color: "black"
 
     DaemonLink { id: daemon }
+
+    property var lastLook: null
 
     property bool editing: false
     function stopEditing() {
@@ -68,6 +72,18 @@ Window {
                     return
                 }
             }
+        }
+        function onDeviceChanged() {
+            const look = daemon.device.look
+            if (!look)
+                return
+            const seen = win.lastLook
+            if (seen && seen.dark === look.dark && seen.glass === look.glass)
+                return
+            win.lastLook = look
+            Theme.dark = look.dark
+            Theme.glass = look.glass
+            Theme.settled = true
         }
         function onConnectedChanged() {
             if (daemon.connected)
@@ -210,5 +226,17 @@ Window {
     ScreenCorners {
         anchors.fill: parent
         color: win.color
+    }
+
+    Timer {
+        interval: 3000
+        running: !Theme.settled
+        onTriggered: Theme.settled = true
+    }
+    Rectangle {
+        anchors.fill: parent
+        z: 1000
+        visible: !Theme.settled
+        color: "black"
     }
 }

@@ -9,8 +9,10 @@
 //!                                                            (변경 시마다 전송. `sys.rs`의 `SysState`)
 //!   {"type":"result","widget":3,"seq":12,"ok":true,"error":""}   위젯이 호스트에 요청한 액션 결과. `seq`는 결과마다 증가한다
 //!                                                            (UI는 번호가 아니라 수신 시점을 보고 최근 실패만 1회 표시한다). 전송 자체를 못했을 때도 전달된다(`ok: false`).
-//!   {"type":"device","brightness":200,"brightness_min":10,"brightness_max":255,"can_power":true,"ssh":true,"can_ssh":true}
-//!                                                            기기 상태: 밝기와 허용 범위, 전원/절전 가능 여부, SSH 동작/제어 가능 여부(변경 시마다 전송. `device.rs`)
+//!   {"type":"device","brightness":200,"brightness_min":10,"brightness_max":255,"can_power":true,"ssh":true,"can_ssh":true,
+//!    "look":{"dark":false,"glass":true}}
+//!                                                            기기 상태: 밝기와 허용 범위, 전원/절전 가능 여부, SSH 동작/제어 가능 여부,
+//!                                                            저장된 화면 테마(변경 시마다 전송. `device.rs`). UI는 받은 `look`을 그대로 적용한다
 //!   {"type":"wifi","available":true,"phase":..,"networks":[..],...}   Wi-Fi 상태(변경 시마다 전송. `wifi.rs`의 `WifiState`)
 //!   {"type":"hosts","hosts":[{"id":..,"name":..,"connected":true,"via":"usb","media":{..}},..],
 //!    "pairing":{"active":false,"candidate":null}}            페어링된 호스트(PC) 목록과 상태, 페어링 진행 상태
@@ -49,6 +51,8 @@
 //! 클라이언트 -> 데몬
 //!   {"type":"brightness","value":120,"keep":true}            화면 밝기 변경. `keep`이 true이면 영구 저장해 다음 부팅 시에도 복원한다
 //!                                                            (드래그 중에는 `keep` 없이 보내고, 손을 뗄 때 `keep: true`로 보낸다).
+//!   {"type":"look","dark":true}                              화면 테마 변경(`dark` 다크 모드, `glass` 유리 효과. 보낸 항목만 바꾼다).
+//!                                                            덱에 저장되어 재부팅 후에도 유지되며, 결과는 `device.look`으로 돌아온다
 //!   {"type":"power_off"}                                     덱 전원 끄기
 //!   {"type":"ssh","on":false}                                SSH 끄기/켜기(`on`이 true면 켜기). 끄면 기존 세션도 종료되며
 //!                                                            재부팅이나 재플래싱 후에도 비활성 상태가 유지된다. 결과는 `device.ssh`로 반영된다.
@@ -156,6 +160,12 @@ pub enum ClientMsg {
     PowerOff,
     Sleep,
     Ssh { on: bool },
+    Look {
+        #[serde(default)]
+        dark: Option<bool>,
+        #[serde(default)]
+        glass: Option<bool>,
+    },
     WifiScan,
     WifiConnect { key: String, psk: Option<String> },
     WifiForget { key: String },

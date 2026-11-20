@@ -4,7 +4,7 @@
 //   DISPLAY / Brightness     화면 밝기 슬라이더. 손을 뗀 최종 값은 기기에 저장되어 재부팅 후에도 유지된다. 밝기 조절을 지원하지 않는 기기에서는 숨겨진다.
 //   DISPLAY / Dark mode      라이트/다크 테마 전환
 //   DISPLAY / Glass effect   디스플레이 유리 반사광 효과 켜기/끄기
-//   (위 두 테마 설정은 아직 영구 저장하지 않으므로 재실행 시 기본값으로 초기화된다)
+//   (위 두 테마 설정은 화면에 바로 적용하고 덱에도 저장해 재부팅 후에도 유지된다: `link.setLook`)
 //   NETWORK / Wi-Fi          Wi-Fi 화면으로 이동(`opened("wifi")`). 진입 시 주변 AP 재스캔을 시작한다.
 //   NETWORK / SSH            덱 SSH 서버 활성화/비활성화 토글. 끄면 USB와 네트워크 모든 경로에서 접속이 차단되며
 //                            기존 연결도 즉시 끊어진다. 설정은 기기에 저장되어 재부팅·재플래싱 후에도 유지된다.
@@ -58,7 +58,10 @@ Column {
             id: darkRow
             title: "Dark mode"
             note: "Use the dark panel"
-            onTapped: Theme.dark = !Theme.dark
+            onTapped: {
+                Theme.dark = !Theme.dark
+                root.link.setLook({ dark: Theme.dark })
+            }
             Toggle {
                 on: Theme.dark
                 interactive: false
@@ -69,7 +72,10 @@ Column {
             id: glassRow
             title: "Glass effect"
             note: "Show reflections on displays"
-            onTapped: Theme.glass = !Theme.glass
+            onTapped: {
+                Theme.glass = !Theme.glass
+                root.link.setLook({ glass: Theme.glass })
+            }
             Toggle {
                 on: Theme.glass
                 interactive: false

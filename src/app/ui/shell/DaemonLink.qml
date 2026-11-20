@@ -14,7 +14,8 @@
 //   cols, rows    페이지 그리드 크기(4x6)
 //   pages         배치  [{"name":..,"racks":[{"id":..,"label":..,"x":..,"y":..,"w":..,"h":..,"widgets":[..]}],"widgets":[복합 위젯..]}]
 //                 위젯: {"id":..,"kind":..,"x":..,"y":..,"w":..,"h":..,"label":..,"color":..,"settings":{..}}
-//   device        기기 제어 상태  {"brightness":..,"brightness_min":..,"brightness_max":..,"can_power":..,"ssh":..,"can_ssh":..}
+//   device        기기 제어 상태  {"brightness":..,"brightness_min":..,"brightness_max":..,"can_power":..,"ssh":..,"can_ssh":..,
+//                                "look":{"dark":..,"glass":..}}   (`look`은 덱에 저장된 화면 테마. `Main`이 `Theme`에 넣는다)
 //   wifi          Wi-Fi 상태  {"available":..,"phase":"idle|connecting|connected|failed","ssid":..,"key":..,"ip":..,"scanning":..,"error":..,
 //                              "freq":..(MHz),"security":..,"signal":..(dBm),"link_speed":..(Mb/s),
 //                              "networks":[{"ssid":..,"key":..,"signal":..(dBm),"kind":"open|psk|other","saved":..}]}
@@ -57,6 +58,7 @@
 //                                        스위치/노브 설정: `action("command.set", {"id": 명령 id, "value": 값}, hostId, widget)`
 //   setBrightness(value, keep)           화면 밝기 변경. `keep`이 true면 기기에 영구 저장(드래그 중에는 false, 손을 뗄 때 true)
 //   setSsh(on)                           덱 SSH 활성화/비활성화
+//   setLook(look)                        화면 테마 저장. `look`은 `{dark: true}`처럼 바꿀 항목만 담는다(`dark` / `glass`). 결과는 `device.look`으로 돌아온다
 //   sleep() / powerOff()                 덱 절전 진입 / 전원 종료
 //   wifiScan()                           주변 AP 재스캔
 //   wifiConnect(key, psk)                AP 연결. `key`는 `networks[].key`. `psk`가 빈 문자열이면 저장된 설정 또는 개방형 AP로 연결
@@ -89,7 +91,7 @@ Item {
     property var catalog: []
     property var results: ({})
     property var wifi: ({ available: false, phase: "idle", networks: [] })
-    property var device: ({ brightness: 0, brightness_min: 0, brightness_max: 0, can_power: false, ssh: false, can_ssh: false })
+    property var device: ({ brightness: 0, brightness_min: 0, brightness_max: 0, can_power: false, ssh: false, can_ssh: false, look: null })
     property var hosts: []
     property var values: ({})
     property var meters: ({})
@@ -122,6 +124,7 @@ Item {
     function powerOff() { send({ type: "power_off" }) }
     function sleep() { send({ type: "sleep" }) }
     function setSsh(on) { send({ type: "ssh", on: !!on }) }
+    function setLook(look) { send(Object.assign({ type: "look" }, look)) }
     function pairStart() { send({ type: "pair_start" }) }
     function pairStop() { send({ type: "pair_stop" }) }
     function pairAccept(code) { send({ type: "pair_accept", code: code }) }

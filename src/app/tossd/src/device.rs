@@ -1,4 +1,4 @@
-//! 기기 자체 제어: 화면 밝기, 전원 종료, 절전, SSH 활성화/비활성화. 화면 설정에서 호출한다.
+//! 기기 자체 제어: 화면 밝기, 전원 종료, 절전, SSH 활성화/비활성화, 화면 테마. 화면 설정에서 호출한다.
 //!
 //! 데몬은 권한 없는 사용자로 실행되므로 각 작업은 다음 방식으로 처리한다.
 //!   밝기   서비스 시작 시 `src/app/rootfs/etc/init.d/tossd`의 `start_pre`에서 `/sys/class/backlight/*/brightness`의
@@ -12,10 +12,12 @@
 //!          유지 여부는 `settings.json`의 `"ssh"` 필드에 저장되며, 부팅 시 `dropbear` 시작 여부도 이 값을 따른다
 //!          (`nix/build-rootfs.sh`에서 `/etc/conf.d/dropbear`의 `start_pre`에 추가한 검사 참고). 값이 없으면 기본으로 열어 둔다.
 //!          현재 열려 있는지 여부는 설정 파일이 아니라 `dropbear` 프로세스가 실제로 동작 중인지로 판별한다.
+//!   테마   UI가 그리는 방식(다크 모드, 유리 효과). 데몬은 값을 저장하고 `device` 상태의 `look`으로 알려 주기만 하며, 실제로 그리는 것은 UI다.
 //!
 //! 도우미는 FIFO를 열어 둔 채 요청을 순차 처리하므로, 이전 작업이 진행 중일 때 보낸 명령도 누락되지 않고 대기열에서 처리된다.
 //!
-//! 밝기와 SSH 설정은 기기에 영구 저장(`data_dir/settings.json`)되며, 밝기는 부팅 시 복원된다.
+//! 밝기, SSH, 테마 설정은 기기에 영구 저장(`data_dir/settings.json`)되며, 밝기는 부팅 시 복원된다.
+//! 테마는 데몬이 시작할 때 읽어 두고, UI가 접속하면 `device` 상태로 받아 그대로 적용한다.
 //! 화면이 완전히 꺼지면 다시 켤 방법이 없으므로 최저 밝기 하한(`BRIGHTNESS_FLOOR`)을 둔다.
 
 use std::fs;
@@ -48,6 +50,21 @@ pub struct DeviceState {
     pub ssh: bool,
     /// SSH 활성화/비활성화 제어 가능 여부(도우미 FIFO 및 SSH 서비스 스크립트 존재 여부)
     pub can_ssh: bool,
+    /// 저장된 화면 테마
+    pub look: Look,
+}
+
+/// 화면 테마: UI의 다크 모드와 디스플레이 유리 반사광 효과. 저장된 값이 없으면 라이트 모드에 유리 효과를 켠다.
+#[derive(Serialize, Clone, Copy, PartialEq, Debug)]
+pub struct Look {
+    pub dark: bool,
+    pub glass: bool,
+}
+
+impl Default for Look {
+    fn default() -> Self {
+        Self { dark: false, glass: true }
+    }
 }
 
 /// 영구 저장용 구조체. 지정하지 않은 항목은 직렬화에서 생략한다.
@@ -58,6 +75,11 @@ struct Saved {
     /// SSH 활성화 여부. 없으면 기본값 true(열림). **필드명과 형식을 바꾸면 `nix/build-rootfs.sh`의 검사도 함께 수정해야 한다.**
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ssh: Option<bool>,
+    /// 화면 테마(`Look`). 바꾼 적 없는 항목은 저장하지 않는다
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    dark: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    glass: Option<bool>,
 }
 
 /// 기본값(`Device::default()`)은 아무 장치도 제어하지 않는다(테스트 환경 또는 백라이트 미지원 환경용).
@@ -76,6 +98,8 @@ pub struct Device {
     writing: Mutex<()>,
     /// 마지막으로 절전 진입을 요청한 시각(`SLEEP_GAP` 이내 중복 요청 방지)
     slept: Mutex<Option<Instant>>,
+    /// 현재 화면 테마(시작할 때 `settings.json`에서 읽고, 바꿀 때마다 저장한다)
+    look: Mutex<Look>,
 }
 
 impl Device {
@@ -90,6 +114,7 @@ impl Device {
             ssh_service: Some("/etc/init.d/dropbear".into()),
             ..Self::default()
         }
+        .load_look()
     }
 
     #[cfg(test)]
@@ -103,6 +128,15 @@ impl Device {
             ssh_service: Some(dir.join("ssh.service")),
             ..Self::default()
         }
+        .load_look()
+    }
+
+    /// 저장된 화면 테마를 읽어 현재 값으로 둔다(저장하지 않은 항목은 기본값).
+    fn load_look(self) -> Self {
+        let saved = self.saved();
+        let base = Look::default();
+        *self.look.lock().unwrap() = Look { dark: saved.dark.unwrap_or(base.dark), glass: saved.glass.unwrap_or(base.glass) };
+        self
     }
 
     /// 저장된 설정을 읽는다. 파일이 없으면 기본값을 반환하고, 파싱할 수 없으면 백업해 둔 뒤(`persist.rs`) 기본값을 쓴다.
@@ -139,7 +173,24 @@ impl Device {
             can_power: self.helper.as_ref().is_some_and(|p| p.exists()),
             ssh: self.ssh_running(),
             can_ssh: self.helper.as_ref().is_some_and(|p| p.exists()) && self.ssh_service.as_ref().is_some_and(|p| p.exists()),
+            look: *self.look.lock().unwrap(),
         }
+    }
+
+    /// 화면 테마를 바꾸고 저장한다(`None`인 항목은 그대로 둔다). 저장에 실패해도 이번 실행 동안은 바꾼 값을 쓴다.
+    pub fn set_look(&self, dark: Option<bool>, glass: Option<bool>) -> Result<(), String> {
+        {
+            let mut look = self.look.lock().unwrap();
+            look.dark = dark.unwrap_or(look.dark);
+            look.glass = glass.unwrap_or(look.glass);
+        }
+        if self.settings.is_none() {
+            return Ok(());
+        }
+        self.save(|s| {
+            s.dark = dark.or(s.dark);
+            s.glass = glass.or(s.glass);
+        })
     }
 
     /// SSH를 켜거나 끈다. 도우미에 명령이 정상 전달된 경우에만 설정 파일에 저장해(다음 부팅 시 dropbear가 참조)
@@ -290,6 +341,26 @@ mod tests {
         assert_eq!(tell(true), "ssh on\n");
         let text = fs::read_to_string(dir.join("settings.json")).unwrap();
         assert!(!closed(&text) && text.contains("\"brightness\": 60"), "{text}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_look_is_kept_across_a_restart_without_touching_other_settings() {
+        let (dev, dir) = fake("look", "255", "200");
+        assert_eq!(dev.state().look, Look { dark: false, glass: true });
+        dev.set_brightness(60, true).unwrap();
+        dev.set_look(Some(true), None).unwrap();
+        assert_eq!(dev.state().look, Look { dark: true, glass: true });
+        let text = fs::read_to_string(dir.join("settings.json")).unwrap();
+        assert!(text.contains("\"dark\": true") && !text.contains("glass") && text.contains("\"brightness\": 60"), "{text}");
+
+        let dev = Device::at(&dir.join("backlight"), &dir.join("helper"), &dir.join("settings.json"));
+        assert_eq!(dev.state().look, Look { dark: true, glass: true });
+        dev.set_look(None, Some(false)).unwrap();
+        let dev = Device::at(&dir.join("backlight"), &dir.join("helper"), &dir.join("settings.json"));
+        assert_eq!(dev.state().look, Look { dark: true, glass: false });
+
+        assert!(Device::default().set_look(Some(true), None).is_ok());
         let _ = fs::remove_dir_all(&dir);
     }
 

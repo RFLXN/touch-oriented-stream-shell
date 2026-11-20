@@ -29,6 +29,7 @@
 //   5. 색상은 절제한다. 패널 전체는 무채색으로 두고, 색상은 몇 가지 버튼 컬러와 인디케이터 상태색에만 사용한다.
 //
 // 라이트 모드와 다크 모드 두 벌을 제공한다. `dark`를 전환하면 모든 색상이 `k`(0=라이트, 1=다크)를 따라 부드럽게 보간된다.
+// `dark`와 `glass`는 덱에 저장된 값을 `Main`이 데몬에서 받아 넣는다. 그 값을 받기 전(`settled`가 false)에는 바뀌어도 애니메이션 없이 바로 적용한다.
 pragma Singleton
 import QtQuick
 
@@ -37,8 +38,12 @@ QtObject {
 
     property bool dark: false
     property bool glass: true
+    property bool settled: false
     property real k: dark ? 1 : 0
-    Behavior on k { NumberAnimation { duration: t.tPage; easing.type: Easing.InOutQuad } }
+    Behavior on k {
+        enabled: t.settled
+        NumberAnimation { duration: t.tPage; easing.type: Easing.InOutQuad }
+    }
 
     function mix(a, b, f) {
         return Qt.rgba(a.r + (b.r - a.r) * f, a.g + (b.g - a.g) * f, a.b + (b.b - a.b) * f, a.a + (b.a - a.a) * f)
