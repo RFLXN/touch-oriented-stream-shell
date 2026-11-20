@@ -293,6 +293,34 @@ fn the_media_widget_keeps_a_spotify_theme_flag() {
     assert_eq!(l.pages[1].widgets.last().unwrap().settings.get("spotify_theme"), None, "불리언이 아닌 값을 남김");
 }
 
+/// 음량 믹서는 대상 PC가 있어야 놓이고, 배치에 있는 음량 믹서의 PC에만 레벨을 구독한다(`audio_hosts`).
+#[test]
+fn mixers_need_a_pc_and_name_the_pcs_to_listen_to() {
+    let mut l = default_layout();
+    l.pages.push(Page::default());
+    let add = |what: &str, json: &str| Edit::Add { what: what.into(), page: 1, settings: serde_json::from_str(json).unwrap() };
+    assert!(l.edit(&add("mixer.4x2", "{}")).is_err(), "PC 없이 음량 믹서가 놓임");
+    assert!(l.audio_hosts().is_empty());
+    assert!(l.edit(&add("mixer.1x2", r#"{"host":"pc1"}"#)).is_err(), "없는 크기의 음량 믹서가 놓임");
+    l.edit(&add("mixer.4x3", r#"{"host":"pc1","output_strip":false}"#)).unwrap();
+    l.edit(&add("mixer.2x2", r#"{"host":"pc1"}"#)).unwrap();
+    let w: Vec<_> = l.pages[1].widgets.iter().map(|w| (w.kind, w.w, w.h, w.settings.get("output_strip").cloned())).collect();
+    assert_eq!(w, [(Kind::Mixer4x3, 4, 3, Some(Value::Bool(false))), (Kind::Mixer2x2, 2, 2, None)]);
+    for (name, size) in [("mixer.2x2", (2, 2)), ("mixer.3x2", (3, 2)), ("mixer.4x2", (4, 2)), ("mixer.2x3", (2, 3)), ("mixer.3x3", (3, 3)), ("mixer.4x3", (4, 3))] {
+        let kind = Kind::from_name(name).unwrap();
+        assert!(kind.is_mixer() && kind.is_composite(), "{name}");
+        let info = catalog::kind_info(kind).unwrap();
+        assert_eq!((info.w, info.h), size, "{name}");
+    }
+    assert_eq!(l.audio_hosts(), ["pc1"]);
+    let id = l.pages[1].widgets[0].id;
+    l.edit(&Edit::Remove { target: Target::Widget, id }).unwrap();
+    assert_eq!(l.audio_hosts(), ["pc1"]);
+    let id = l.pages[1].widgets[0].id;
+    l.edit(&Edit::Remove { target: Target::Widget, id }).unwrap();
+    assert!(l.audio_hosts().is_empty());
+}
+
 /// 스위치만 인디케이터 색상(`light`)을 설정에 남긴다. 다른 명령 위젯에서는 버린다.
 #[test]
 fn only_switches_keep_an_indicator_color() {

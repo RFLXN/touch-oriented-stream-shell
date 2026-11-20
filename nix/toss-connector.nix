@@ -4,11 +4,14 @@
 #   nix build .#toss-connector  ->  result/bin/toss-connector
 #
 # `flake.nix`가 시스템별로 이 파일을 호출해 `packages.<시스템>.toss-connector`로 노출하고, NixOS 모듈(`nix/nixos-module.nix`)이 이를 사용한다.
+# 음량 믹서(`src/app/host/src/audio`)가 PulseAudio 클라이언트 라이브러리(`libpulseaudio`)에 링크한다. PipeWire 환경에서는 pipewire-pulse가 서버 역할을 한다.
 # `rust`는 cargo와 rustc가 포함된 툴체인이다(`flake.nix`에서 `rust-overlay`로 제공하며 버전은 `flake.lock`으로 고정).
 {
   lib,
   stdenv,
   makeRustPlatform,
+  pkg-config,
+  libpulseaudio,
   rust,
 }:
 let
@@ -34,7 +37,9 @@ stdenv.mkDerivation {
   nativeBuildInputs = [
     rust
     rustPlatform.cargoSetupHook
+    pkg-config
   ];
+  buildInputs = [ libpulseaudio ];
   buildPhase = ''
     runHook preBuild
     cargo build --release --offline

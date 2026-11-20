@@ -154,6 +154,8 @@ TCP 위에서 **"길이(2바이트 빅 엔디안) + 페이로드"** 프레임을
 |---|---|---|
 | `media.info` | 재생 중인 곡 제목·아티스트·앨범·진행 상태를 덱으로 전송 | 허용 |
 | `media.control` | 덱에서 재생/일시정지, 트랙 이동, 시크, 반복·셔플 제어 가능 | 허용 |
+| `audio.info` | 출력 장치와 소리를 내는 앱의 이름·음량·음소거·출력 장치를 덱으로 전송. 레벨 미터는 덱에 그 PC의 음량 믹서가 있을 때만 측정(4.6절 "음량 믹서") | 허용 |
+| `audio.control` | 덱의 음량 믹서에서 앱과 출력 장치의 음량·음소거, 앱의 출력 장치, 기본 출력 장치 변경 | **거부** |
 | `resource.info` | PC 리소스 사용량(CPU, 메모리, GPU, 디스크, 네트워크, 온도)을 덱으로 전송. 덱의 리소스 미터 위젯이 구독 중인 항목만 측정(4.6절 "리소스 모니터링") | 허용 |
 | `command.run` | PC에 **미리 등록된** 명령을 덱에서 실행하고, 등록된 스위치·노브 상태를 조회·변경 가능(4.6절 "명령") | **거부** |
 | `web.open` | 덱의 웹페이지 버튼으로 이 PC의 기본 브라우저에서 주소를 연다. `http://`, `https://` 주소만 연다 | **거부** |
@@ -169,7 +171,7 @@ TCP 위에서 **"길이(2바이트 빅 엔디안) + 페이로드"** 프레임을
 - **PC에서 페어링을 삭제하면** 연결 중이던 세션도 즉시 끊는다.
 - **페어링되지 않은 피어에는 어떤 정보도 보내지 않는다.** 키 교환으로 상대 신원을 확인한 뒤에야 `hello`(이름, OS, 허용 권한)를 보낸다.
 - 거부된 액션은 호스트 로그에 남는다(`덱 요청 거부됨 (…)`).
-- **PC 시스템을 변경하는 권한(명령 실행, 키 입력 등)은 기본값이 거부다.** 사용자가 덱마다 명시적으로 허용해야 한다. `command.run`이 여기에 해당한다.
+- **PC 시스템을 변경하는 권한(명령 실행, 키 입력, 음량·출력 장치 변경 등)은 기본값이 거부다.** 사용자가 덱마다 명시적으로 허용해야 한다. `command.run`, `web.open`, `audio.control`이 여기에 해당한다.
 
 ### 권한 변경 방법
 
@@ -190,6 +192,7 @@ NixOS에서는 시스템 설정으로 권한을 고정할 수도 있다(`program
 
 - 미디어 위젯: `media.control`이 없으면 버튼이 비활성화된다. `media.info`가 없으면 `Not shared`가 표시된다.
 - 리소스 미터: `resource.info`가 없으면 해당 PC 행이 흐려지고 수치 자리에 `--`가 뜬다.
+- 음량 믹서: `audio.info`가 없으면 `Not shared`가 표시된다. `audio.control`이 없으면 페이더와 버튼이 흐려지고 눌리지 않는다.
 - 명령 위젯(버튼, 스위치, 노브): `command.run`이 없으면 흐려지고 눌리지 않는다. 위젯 추가 메뉴에도 해당 PC의 명령이 나오지 않는다.
 - 설정 → `Paired devices` → 대상 기기의 `Allows` 항목에서 현재 허용된 권한을 확인할 수 있다(연결 중일 때만). 변경은 PC에서만 가능하다.
 
@@ -215,6 +218,8 @@ NixOS에서는 시스템 설정으로 권한을 고정할 수도 있다(`program
 | `command_value` | `id`, `value`(모르면 `null`) | 상태를 가진 명령(스위치, 단계, 범위)의 현재 값. **값이 바뀐 경우에만** 전송(단 `commands` 전송 직후 초기값 1회와 덱이 값을 설정한 직후 재조회한 값은 변화가 없어도 전송). 스위치는 `0`/`1`, 단계는 인덱스(0부터), 범위는 수치 |
 | `metrics` | `metrics`(`id`, `name`, `title`, `unit`, `max`, `decimals`) | 호스트에서 수집 가능한 메트릭 목록. `resource.info` 허용 시에만 연결 직후 및 변경 시 전체 전송. 권한을 끄면 빈 목록 전송 |
 | `metric_values` | `values`(메트릭 ID → 값) | 메트릭 현재 값. **덱이 구독 요청한 항목 중 값이 바뀐 항목만** 전송(약 1초 주기) |
+| `audio` | `audio`(`outputs`, `apps`. 없으면 `null`) | 음량 믹서 상태. `audio.info` 허용 시에만 연결 직후와 무엇이든 바뀔 때마다 전체 전송. 오디오 서버에 연결하지 못했거나 권한을 끄면 `null`. 아래 "음량 믹서" 참고 |
+| `audio_levels` | `apps`(앱 ID → 값), `outputs`(장치 ID → 값) | 레벨 미터 값(0~1). **덱이 구독(`watch`의 `audio`) 중일 때만** 0.1초마다, 값이 바뀐 항목만 전송 |
 | `pair_confirm` | — | 호스트 측 사용자가 검증 코드를 확인함 |
 | `media` | `media`(없으면 `null`) | 재생 정보. **이벤트 발생 시에만** 전체 전송: 곡 변경, 재생/일시정지/정지, 시크, 플레이어 생성·종료. 재생 중 경과 시간 갱신용으로는 보내지 않음 |
 | `blob` | `id`, `mime`, `index`, `count`, `data` | 대용량 바이너리 청크(현재는 앨범 아트). 아래 "대용량 바이너리" 참고 |
@@ -232,7 +237,7 @@ NixOS에서는 시스템 설정으로 권한을 고정할 수도 있다(`program
 | `paired` | — | 페어링 완료 |
 | `denied` | `reason` | 연결 거절. 직후 소켓 종료 |
 | `action` | `id`, `name`, `args` | 액션 실행 요청. `id`는 `result`와 상관관계 매칭용 시퀀스 |
-| `watch` | `metrics`(메트릭 ID 목록) | 덱이 현재 표시 중인 메트릭 목록. 호스트는 여기에 포함된 항목만 수집. 연결 직후 및 레이아웃 변경마다 전체 전송. 빈 배열이면 수집 중단 |
+| `watch` | `metrics`(메트릭 ID 목록), `audio`(불리언, 생략 시 `false`) | 덱이 현재 표시 중인 메트릭 목록과 음량 레벨 구독 여부. 호스트는 여기에 포함된 항목만 수집하고, `audio`가 참일 때만 레벨을 측정한다. 연결 직후 및 레이아웃 변경마다 전체 전송. 빈 배열이면 메트릭 수집 중단 |
 | `vault_reply` | `id`, `ok`, `error`, `data` | `vault` 응답. 실패하면 `error`에 `denied`, `busy`, `timeout`, `not_set`, `not_linked`, `unknown` 중 하나나 사유 문장이 담긴다(4.15절) |
 | `vault_state` | `services`(`id`, `title`, `registered`, `linked`, `allowed`) | 덱 금고 상태. 키 값은 포함하지 않는다. 연결 직후와 상태가 바뀔 때마다 전체 전송. `allowed`는 이 호스트가 금고를 쓸 수 있는지 |
 | `ping` | — | 연결 유지(keep-alive) |
@@ -266,6 +271,10 @@ NixOS에서는 시스템 설정으로 권한을 고정할 수도 있다(`program
 | `command.run` | 호스트에 등록된 명령 실행. `args`: `{"id": "<명령 ID>"}` | `command.run` |
 | `command.set` | 호스트에 등록된 스위치·단계·범위 명령 값 설정. `args`: `{"id": "<명령 ID>", "value": 1}`(값 형식은 `command_value`와 동일) | `command.run` |
 | `web.open` | 호스트의 기본 브라우저로 웹페이지 열기. `args`: `{"url": "https://..."}`. 호스트는 `http://`, `https://` 주소만 열고, 셸을 거치지 않고 `xdg-open`(macOS는 `open`)의 인자로만 넘긴다 | `web.open` |
+| `audio.volume` | 음량 설정. `args`: `{"app": "<앱 ID>", "volume": 0.5}` 또는 `{"output": "<장치 ID>", "volume": 0.5}`. 0~1(1이 100%), 범위 밖은 잘라 낸다. 채널 사이의 균형은 유지한다 | `audio.control` |
+| `audio.mute` | 음소거 설정. `args`: `{"app" 또는 "output": .., "on": true}` | `audio.control` |
+| `audio.route` | 앱의 출력 장치 변경. `args`: `{"app": "<앱 ID>", "output": "<장치 ID>"}`. 그 앱의 모든 스트림을 옮긴다 | `audio.control` |
+| `audio.default` | 기본 출력 장치 변경. `args`: `{"output": "<장치 ID>"}` | `audio.control` |
 
 - **상태 전환 액션은 "토글하라"가 아니라 "이 값으로 설정하라"로 보낸다**(`on`, `mode`). 같은 메시지를 중복 수신해도 멱등성이 보장되며, 덱이 가진 상태가 약간 지연됐더라도 의도와 반대로 뒤집히지 않는다.
 - 시크는 호스트가 목표 위치를 계산해 곡 범위 `[0, length_ms)` 내로 클램프한다(0 이전이면 0으로, 곡 끝을 넘기면 끝 직전으로 맞춰 다음 곡으로 넘어가지 않게 함).
@@ -379,6 +388,18 @@ toss-connector command add-discord 'Discord Headset' deaf   # Discord 헤드셋 
 
 시스템에 존재하는 장치만 목록에 나온다(GPU가 없으면 GPU 항목 없음). 현재 PC에서 잡히는 항목을 확인하려면 `cd src/app/meter && cargo run --example show`를 실행하면 된다.
 
+### 음량 믹서 (`audio`, `audio_levels`, `watch`의 `audio`)
+
+덱의 음량 믹서 위젯(앱 Volume mixer)이 PC의 앱별 음량, 레벨 미터, 출력 장치를 보여 주고 바꾼다. 호스트는 PulseAudio 서버에 클라이언트로 붙는다(`src/app/host/src/audio.rs`, `audio/pulse.rs`). PipeWire 환경에서는 `pipewire-pulse`가 서버 역할을 하므로 그대로 동작한다.
+
+- **상태(`audio`)**: 출력 장치(`outputs`: `id`, `title`, `volume`, `muted`, `default`)와 소리를 내는 앱(`apps`: `id`, `name`, `volume`, `muted`, `output`, `streams`)이다. 장치 `id`는 PulseAudio sink 이름이고, `title`은 장치 설명이다. 음량은 PulseAudio의 100%(`PA_VOLUME_NORM`)를 1로 한 값이며 채널 중 가장 큰 값이다. 호스트는 서버가 알리는 변경(sink, sink input, client, server 구독)마다 다시 읽어 직전에 보낸 것과 다를 때만 전체를 보낸다.
+- **앱 묶기**: 같은 앱의 스트림(브라우저 탭, Discord의 여러 음성 스트림 등)은 하나로 묶는다. 묶는 키는 실행 파일 이름(`application.process.binary`, 소문자)이고, NixOS 래퍼 이름(`.Discord-wrapped`)은 원래 이름으로 되돌린다. 표시 이름은 앱이 밝힌 이름(`application.name`)이 실행 파일 이름과 겹칠 때만 쓰고(`Firefox`), 겹치지 않으면(`WEBRTC VoiceEngine`) 실행 파일 이름을 쓴다. 스트림에 이 속성이 없으면 그 스트림을 만든 클라이언트의 속성을 쓴다(PipeWire의 일부 앱). 묶인 앱의 `volume`은 스트림 중 가장 큰 값, `muted`는 모든 스트림이 음소거일 때 참, `output`은 스트림들이 서로 다른 장치로 나가면 빈 문자열이다. 앱은 64개까지 보낸다.
+- **레벨(`audio_levels`)**: 덱이 `watch`의 `audio`로 구독할 때만 측정한다. 호스트는 스트림과 출력 장치마다 피크 측정 스트림(`PA_STREAM_PEAK_DETECT`, 초당 25개, 스트림은 `set_monitor_stream`으로 그 스트림만)을 열고, 0.1초마다 그 구간의 최댓값(0~1 진폭, 0.01 단위)을 앱별(묶인 스트림의 최댓값)·장치별로 모아 바뀐 것만 보낸다. 구독이 끝나면 측정 스트림을 모두 닫는다. 덱 UI는 이 값을 -60~0 dB로 환산해 표시한다.
+- **액션**: 앱을 가리키면 묶인 스트림 모두에 적용한다. 대상이 지금 없으면(앱이 소리를 멈춤 등) 실패로 회신한다. 호스트는 대상이 있는지까지만 확인하고 돌아오며, 실제 반영은 뒤따르는 `audio`로 확인한다.
+- **덱 측**: 데몬은 받은 문자열과 개수를 제한한다(장치 32개, 앱 64개, ID 256바이트, 이름 80자, 음량 0~4). 레벨은 지금 상태에 있는 앱·장치의 값만 받는다. 레벨 구독은 배치에 그 호스트를 가리키는 음량 믹서 위젯이 있는지로 정한다(`Layout::audio_hosts`).
+- 리눅스 외의 OS에서는 서버에 연결하지 않으므로 `audio`가 `null`이다. 오디오 서버가 없거나 연결이 끊기면 `null`을 알리고 3초마다 다시 연결한다.
+- PC에서 확인: `toss-connector audio`(덱에 보일 장치와 앱 목록), `toss-connector audio levels`(이어서 레벨을 계속 출력).
+
 ### 대용량 바이너리 (`blob`)
 
 단일 메시지 크기 제한을 넘는 데이터는 청크로 분할해 전송한다. 현재는 앨범 아트 전송에만 사용한다.
@@ -413,9 +434,10 @@ toss-connector command add-discord 'Discord Headset' deaf   # Discord 헤드셋 
   │  아니면 아무것도 안 보내고 연결 종료  │
   │── hello {caps: 허용 권한} ──────────▶│  페어링된 호스트 키인지 확인
   │◀── hello {status: "paired", addrs} ──│  아니면 denied 전송 후 연결 종료
-  │◀── watch {구독 메트릭 목록} ──────────│  리소스 미터 위젯이 선택한 메트릭
-  │── media, commands, metrics ────────▶│  허용된 항목만 전송. UI로 전달
+  │◀── watch {메트릭 목록, audio} ───────│  리소스 미터가 고른 메트릭, 음량 믹서 유무
+  │── media, commands, metrics, audio ─▶│  허용된 항목만 전송. UI로 전달
   │── command_value, metric_values ────▶│  값이 바뀔 때마다 푸시
+  │── audio_levels ────────────────────▶│  구독 중일 때만 0.1초마다(바뀐 값만)
   │◀── action {id, name} ────────────────│  화면 버튼 탭 / 노브 조작
   │  권한 검사 → 실행 또는 거절           │
   │── result {id, ok, error} ──────────▶│
@@ -435,6 +457,8 @@ toss-connector command add-discord 'Discord Headset' deaf   # Discord 헤드셋 
   | 명령 목록(`commands`) | 목록 또는 권한 변경 시 | 설정 파일 변경을 0.5초마다 감지 |
   | 스위치·노브 값(`command_value`) | 값이 바뀔 때 | 등록된 상태 조회 커맨드를 설정 주기(기본 2초)마다 실행 |
   | 리소스 수치(`metric_values`) | 덱 구독 항목 중 값이 바뀔 때 | 1초마다 측정(덱이 구독 중인 항목만) |
+  | 음량 믹서 상태(`audio`) | 장치·스트림·기본 장치가 바뀔 때 | 오디오 서버의 변경 알림(subscribe) |
+  | 레벨(`audio_levels`) | 덱이 구독 중이고 값이 바뀔 때 | 0.1초마다(서버가 피크를 초당 25개 보냄) |
   | 허용 권한(`caps`) | 권한 변경 시 | 설정 파일 및 관리형 설정 변경을 0.5초마다 감지 |
 
 - **재생 중 경과 시간 증가는 이벤트로 취급하지 않는다.** 덱이 로컬에서 자체 계산하므로 한 곡을 듣는 동안 `media`는 최초 1회만 전송된다.
@@ -444,7 +468,7 @@ toss-connector command add-discord 'Discord Headset' deaf   # Discord 헤드셋 
 - **재생 위치를 보고하지 않는 플레이어**(항상 같은 값 반환)는 `rate`를 0으로 보낸다. 덱이 타이머를 돌리면 폴링 때마다 1.5초를 초과해 어긋나 원복되는 현상이 반복되기 때문이다.
 - **덱 측 처리**: 데몬은 `media` 수신 시각을 기록해 두고 UI에 전달할 때마다 해당 시점 위치로 보정해 넘긴다(UI가 나중에 접속해도 정확한 위치를 받음). UI(미디어 위젯)는 수신한 위치에서 0.25초마다 자체 카운트한다.
 - 덱 UI는 호스트가 새 상태를 보내 줄 때만 갱신된다. 버튼을 눌렀다고 UI가 선반영하지 않는다.
-- 연결이 끊기면 덱은 해당 호스트의 런타임 상태(`media`, `caps`, 연결 경로, 명령 목록·값, 메트릭 목록·값)를 비우고 오프라인으로 표시한다.
+- 연결이 끊기면 덱은 해당 호스트의 런타임 상태(`media`, `caps`, 연결 경로, 명령 목록·값, 메트릭 목록·값, 음량 믹서 상태·레벨)를 비우고 오프라인으로 표시한다.
 
 ## 4.8 연결 경로 및 장애 복구
 
@@ -531,6 +555,7 @@ nix build .#toss-connector -o dist/toss-connector && ./dist/toss-connector/bin/t
 | `toss-connector command add-linear <이름> --set <명령> [--min 0] [--max 100] [--step 1] [--state <명령>] [--every <초>]` | 범위 등록. `--set`의 `{}` 자리에 값이 들어감 |
 | `toss-connector command add-discord <이름> <동작>` | Discord 동작 명령 등록(`mute`, `deaf`. 4.6절 "Discord 동작") |
 | `toss-connector command set <id 또는 이름> <값>` / `state <id 또는 이름>` | PC에서 값 설정 테스트, 현재 상태 조회 테스트(등록한 커맨드가 맞는지 확인할 때). `set`은 해당 명령의 커맨드만 실행: 스폰에 실패하거나 커맨드가 실패로 끝나면 사유를 출력하고 종료 코드 1로 종료. 상태 조회 커맨드가 있으면 설정한 값이 보일 때까지 최대 4초 동안 조회한 뒤 현재 상태를 출력 |
+| `toss-connector audio` / `audio levels` | 덱의 음량 믹서에 보일 출력 장치와 앱 목록 출력 / 이어서 레벨을 계속 출력(Ctrl+C로 종료). 오디오 서버 연결을 확인할 때 쓴다 |
 | `toss-connector managed` | 관리형 설정(NixOS 모듈의 `config`) 조회: strict 여부, 고정된 권한과 명령 |
 | `toss-connector managed check <파일>` | 관리형 설정 파일을 검증하고 정리한 결과를 출력(모듈이 빌드 중에 사용. 오류가 있으면 실패) |
 | `toss-connector console` | 웹 콘솔을 브라우저로 열기(실행 중인 `toss-connector`가 서빙) |
@@ -558,7 +583,7 @@ nix build .#toss-connector -o dist/toss-connector && ./dist/toss-connector/bin/t
 |---|---|
 | `src/main.rs` | CLI 인자를 파싱해 아래 모듈로 전달. 사용법(`USAGE`)과 인자 검증 |
 | `src/daemon.rs` | 인자 없이 실행했을 때의 동작: 덱 주소들로 접속을 시도하고, 연결되면 `session`에 넘기고, 끊기면 재접속. 설정 디렉터리의 `lock` |
-| `src/session.rs` | 덱 1대와 연결된 동안의 동작(`session`): 권한(`Policy`), 덱이 요청한 액션 처리, 상태 피드 3종(`MediaFeed`, `CommandFeed`, `MeterFeed`) |
+| `src/session.rs` | 덱 1대와 연결된 동안의 동작(`session`): 권한(`Policy`), 덱이 요청한 액션 처리, 상태 피드 4종(`MediaFeed`, `CommandFeed`, `MeterFeed`, `AudioFeed`) |
 | `src/link.rs` | 주소 하나에 접속해 hello 교환까지 수행(`attach`), 접속을 시도할 주소와 저장할 주소, 연결 유지 ping |
 | `src/pairing.rs` | 페어링 흐름. CLI `pair`와 웹 콘솔이 공용 |
 | `src/standby.rs` | 덱 절전 전환과 웨이크업 |
@@ -577,6 +602,8 @@ nix build .#toss-connector -o dist/toss-connector && ./dist/toss-connector/bin/t
 | `src/spotify.rs` | Spotify 로그인 돕기: 덱에서 받은 공개 값으로 승인 주소를 만들고, 브라우저가 돌아온 콜백의 `state`를 확인해 승인 코드를 덱에 넘긴다 |
 | `src/discord/live.rs` | Discord 상주 연결: 쓰는 곳이 있는 동안 연결을 유지하고(재연결 포함) 구독한 이벤트의 최신 값을 기억한다. Discord 동작 명령이 이 연결로 값을 쓰고 읽는다 |
 | `src/web.rs` | 웹페이지 열기(`web.open`): 주소 검증과 `xdg-open` 실행 |
+| `src/audio.rs` | 음량 믹서 스레드(`Mixer`): 오디오 서버 연결·재연결, 세션의 요청 전달, 앱 묶기(`app_of`), 바뀐 레벨 고르기 |
+| `src/audio/pulse.rs` | PulseAudio 연결(리눅스 전용): 장치·스트림·클라이언트 읽기, 피크 측정 스트림, 음량 액션 실행 |
 | `console/` | 웹 콘솔의 프론트엔드(정적 파일 3개). 빌드 시 바이너리에 내장 |
 
 ### NixOS에 설치 (`programs.toss-connector`)
@@ -744,6 +771,8 @@ toss-connector console         # 브라우저로 열기 (토큰 자동 첨부)
 | 데몬 → UI | `hosts` | 페어링된 호스트 목록 및 페어링 진행 상태. 변경 시만 전송 |
 | 데몬 → UI | `meters` | 수집 가능한 메트릭 목록: 대상 → 목록. 대상은 `@deck`(덱 자신) 또는 호스트 ID. 변경 시 전체 전송 |
 | 데몬 → UI | `meter_values` | 메트릭 현재 값: 대상 → 메트릭 ID → 값. 리소스 미터 위젯이 구독 중인 항목만 포함 |
+| 데몬 → UI | `audio` | 음량 믹서 상태: 호스트 ID → `{outputs, apps}`. 상태를 보낸 온라인 호스트만. 변경 시 전체 전송 |
+| 데몬 → UI | `audio_levels` | 레벨: 호스트 ID → `{apps, outputs}`. 배치에 음량 믹서가 있는 호스트만. UI 서버 주기(0.1초)마다 바뀐 경우 전송 |
 | 데몬 → UI | `values` | 호스트에 등록된 스위치·노브 현재 값: 호스트 ID → 명령 ID → 값. 변경 시 전체 전송. 값을 모르는 항목은 미포함 (`hosts`와 분리 전송: 노브 조작 시 빈번히 바뀌는데 그때마다 앨범 아트가 포함된 `hosts` 전체를 재전송하지 않기 위함) |
 | UI → 데몬 | `action` | 호스트 액션 실행 요청(`host`, `name`, `args`). `host`가 비어 있으면 연결된 첫 호스트로 라우팅. `widget`에 위젯 ID를 주면 결과가 `result`로 회신됨 |
 | 데몬 → UI | `result` | 위젯 액션 실행 결과(`widget`, `seq`, `ok`, `error`). 그 액션을 받은 호스트의 응답만 전달. 전송 실패 시에도 회신됨(`ok` false, `error` `no_host`) |
@@ -765,15 +794,15 @@ toss-connector console         # 브라우저로 열기 (토큰 자동 첨부)
 | `pairing.candidate` | 페어링 대기 중인 후보 호스트(없으면 `null`): `name`, `os`, `via`, `code`(검증 코드), `host_confirmed`, `deck_accepted` |
 
 - 위젯은 `host`와 `action(name, args)`를 받는다(3.17절). 명령 위젯은 대상 명령(`command`)와 현재 값(`value`)도, 리소스 미터는 대상 메트릭 목록과 수치(`metrics`, `metricValues`)도 전달받는다.
-- **덱이 표시 중인 메트릭을 호스트에 구독 요청한다(`watch`).** 데몬이 레이아웃 내 리소스 미터 위젯들이 고른 항목을 호스트별로 집계해(`Layout::watched`), 호스트 연결 시와 레이아웃 변경 시 전송한다. 덱 자체 리소스 위젯 항목은 데몬이 직접 측정한다.
+- **덱이 표시 중인 메트릭을 호스트에 구독 요청한다(`watch`).** 데몬이 레이아웃 내 리소스 미터 위젯들이 고른 항목을 호스트별로 집계해(`Layout::watched`), 호스트 연결 시와 레이아웃 변경 시 전송한다. 덱 자체 리소스 위젯 항목은 데몬이 직접 측정한다. 음량 믹서가 가리키는 호스트(`Layout::audio_hosts`)에는 같은 메시지의 `audio`를 참으로 보내 레벨을 구독한다.
 - **스위치와 노브는 사용자 조작 결과를 낙관적으로 선표시한다.** 값을 설정한 뒤 1.5초 동안은 사용자가 선택한 값을 보여 주다가 이후 다시 호스트가 보고한 값으로 복귀한다. 그사이에 호스트가 새 값을 알려 오면 그대로 이어받고, 변화가 없으면(커맨드 실행 실패 등) 기존 값으로 돌아간다. 연속 노브는 드래그 중 0.09초 스로틀링으로 전송하고, 손을 뗄 때 최종값을 한 번 더 전송한다. **위젯은 `host.caps`를 확인해 미허용 액션을 호출하는 컨트롤을 비활성화한다.**
 - **위젯마다 대상 호스트를 지정한다.** 위젯 설정 `host`에 호스트 ID가 지정돼 있으면 해당 호스트만 추적·제어한다(미연결 시 오프라인으로 표시). 비어 있으면 연결된 첫 호스트를 따른다. 추가 시 선택한다([03-userland-guide.md](03-userland-guide.md) 3.16절 "레이아웃 편집").
-- 관련 코드(`src/app/tossd/src/hosts/`): `session.rs`(단일 세션 — 헬로, 수락 판정, 메시지 수신), `pairing.rs`(페어링 모드·후보·상호 확인), `blob.rs`(청크 기반 앨범 아트 조립), `store.rs`(`hosts.json`과 `key`), `vault.rs`(덱 금고. 4.15절), `mod.rs`(호스트 상태 `Hosts`, UI 전달 모델, 액션 라우팅). 변경 사항은 `Events`(`hosts`, `values`, `meters`, `result`, `sleep`, `vault`)로 데몬 코어에 전달하며 `src/app/tossd/src/state.rs`의 `Shared`가 받아 UI로 푸시한다.
+- 관련 코드(`src/app/tossd/src/hosts/`): `session.rs`(단일 세션 — 헬로, 수락 판정, 메시지 수신), `pairing.rs`(페어링 모드·후보·상호 확인), `blob.rs`(청크 기반 앨범 아트 조립), `store.rs`(`hosts.json`과 `key`), `vault.rs`(덱 금고. 4.15절), `mod.rs`(호스트 상태 `Hosts`, UI 전달 모델, 액션 라우팅). 변경 사항은 `Events`(`hosts`, `values`, `meters`, `audio`, `audio_levels`, `result`, `sleep`, `vault`)로 데몬 코어에 전달하며 `src/app/tossd/src/state.rs`의 `Shared`가 받아 UI로 푸시한다.
 - 덱 측 로그는 `/var/log/tossd.log`의 `host:` 접두사 라인이다(페어링, 연결, 종료, 거절, 권한 변경, 액션 실패). 재생 정보 같은 상태 페이로드는 남기지 않는다.
 
 ## 4.12 확장 가이드
 
-### 호스트에서 새 상태 추가 (예: 시스템 볼륨)
+### 호스트에서 새 상태 추가 (예: 배터리)
 
 **이벤트 발생 시에만 전송하도록 설계한다.** 주기적인 전체 상태 재전송은 하지 않는다. 전송 판단은 호스트 측이 담당한다. 기존 구현 패턴을 참고하면 된다(4.7절 표):
 
@@ -788,10 +817,10 @@ toss-connector console         # 브라우저로 열기 (토큰 자동 첨부)
 4. 덱(`src/app/tossd/src/hosts/session.rs`): `serve`에서 수신해 `HostInfo`(`hosts/mod.rs`)에 반영하고, `Changed`를 반환하면 UI로 푸시된다. 갱신 빈도가 높은 값이면 `HostInfo`와 분리해 별도 채널로 전달한다(`Events`의 `values`, `meters` 방식).
 5. UI: 위젯 QML에서 `host` 프로퍼티를 참조한다(분리 채널 값은 `shell/WidgetSlot`에서 바인딩해 전달).
 
-### 덱에서 새 액션 추가 (예: 볼륨 조절)
+### 덱에서 새 액션 추가 (예: 키 입력)
 
 1. 프로토콜에 `ACTION_*` 상수를 추가하고 **`action_cap`에 필요 권한을 매핑한다.** 매핑되지 않은 액션은 호스트가 차단한다.
-2. 호스트: `src/session.rs`의 `Session::act`에서 권한 검증 후 해당 핸들러로 라우팅한다(현재 `command.*`는 `CommandFeed::act`, 나머지는 미디어 플레이어로 전달).
+2. 호스트: `src/session.rs`의 `Session::act`에서 권한 검증 후 해당 핸들러로 라우팅한다(현재 `command.*`는 `CommandFeed::act`, `audio.*`는 `AudioFeed::act`, 나머지는 미디어 플레이어로 전달).
 3. UI: 위젯에서 `action("이름", 인자)` 시그널을 발생시킨다. 덱 데몬은 수정할 필요 없이 이름과 인자를 그대로 호스트로 중계한다.
 
 ### 권한(capability) 추가
@@ -829,7 +858,7 @@ toss-connector console         # 브라우저로 열기 (토큰 자동 첨부)
 | 다중 호스트 | 덱은 여러 호스트와 페어링·동시 연결 가능. 위젯별로 대상 호스트 지정(추가 시 선택, 미지정 시 연결된 첫 호스트) | 위젯 추가 후 대상 호스트 변경 UI. 실제 다중 호스트 동시 접속 실기기 테스트 |
 | 다중 덱 | 호스트는 여러 덱과 페어링 가능하나 한 번에 1대만 연결 | 다중 덱 동시 연결 |
 | 지원 OS | 리눅스(MPRIS) | Windows, macOS |
-| 제공 기능 | 리소스 모니터링(CPU, 메모리, GPU, 디스크, 네트워크, 온도). 재생 정보·앨범 아트 표시, 재생/일시정지, 트랙 이동, ±5초 시크, 반복, 셔플. PC 등록 명령 실행, 스위치, 단계 노브, 연속 노브(상태는 PC가 보고). 덱의 웹페이지 버튼으로 PC 브라우저에서 주소 열기 | 볼륨·키 입력 같은 내장 액션(현재는 셸 커맨드 등록으로 대체), 진행 바 터치 시크 등 |
+| 제공 기능 | 리소스 모니터링(CPU, 메모리, GPU, 디스크, 네트워크, 온도). 재생 정보·앨범 아트 표시, 재생/일시정지, 트랙 이동, ±5초 시크, 반복, 셔플. PC 등록 명령 실행, 스위치, 단계 노브, 연속 노브(상태는 PC가 보고). 덱의 웹페이지 버튼으로 PC 브라우저에서 주소 열기. 음량 믹서(앱별·출력 장치 음량, 음소거, 레벨 미터, 앱의 출력 장치와 기본 출력 장치 변경. PulseAudio/pipewire-pulse) | 키 입력 같은 내장 액션(현재는 셸 커맨드 등록으로 대체), 진행 바 터치 시크, 음량 믹서의 앱 아이콘과 마이크(입력) 쪽 등 |
 | 스위치·노브 상태 | 호스트가 등록된 모든 상태 조회 커맨드를 주기마다 실행 | 덱 레이아웃에 실제 배치된 명령만 폴링(리소스의 `watch`와 같은 구독 방식). 상태 변경 이벤트를 기다리는 push형 상태 커맨드 |
 | 리소스 수집 | 리눅스 CPU·메모리·GPU(AMD, NVIDIA)·디스크·네트워크·온도·팬·배터리. 덱 구독 항목만 측정 | Intel GPU 사용률, 프로세스별 사용량, 인터페이스·디스크 개별 속도, Windows·macOS 지원 |
 | 권한·명령 관리 | 사용자가 웹 콘솔이나 CLI로 관리. NixOS 모듈 설정으로 고정 가능(`strict`) | 덱별로 다른 NixOS 고정 권한 지정(현재는 모든 덱 공통). 관리형 명령과 이름 충돌로 가려진 사용자 명령을 CLI에서 삭제하는 기능(현재는 `commands.json` 직접 수정 필요) |
@@ -862,6 +891,7 @@ toss-connector console         # 브라우저로 열기 (토큰 자동 첨부)
 | 이벤트 기반 동기화 | 한 곡 재생 중 `media`는 1회만 전송되고 덱 로컬 위치 추정이 실제와 1초 이내 오차로 일치. 플레이어 시크/상태 변경 시 즉시 반영(실사용 확인) |
 | 재생 제어 | 덱 버튼으로 Spotify 제어: 5초 뒤로·앞으로, 반복(없음 → 전체 → 한 곡 → 없음), 셔플 토글. 플레이어 상태 변경 및 덱 버튼 상태 반영 |
 | 리소스 미터 | PC 리소스 표시: 덱 추가 메뉴에서 대상 PC 선택 시 41개 항목(CPU 및 코어 16개, 온도, 클럭, 로드, 메모리, 스왑, GPU 2종 사용률·VRAM·온도·전력·팬, 디스크, 파일시스템, 네트워크, SSD 온도) 노출, 12개 선택해 4×2 배치 시 1~2초 후 수치 유입(CPU 4%, 53°C, 3.89GHz, 메모리 11.9GB, GPU 21%·1.8GB·57°C·51W 등). `toss-connector deny resource.info` 실행 시 흐려지며 `--`, 재허용 시 복구. 덱 자체 미터(온도, 메모리, 로드)도 동일 위젯으로 표시 |
+| 음량 믹서 | PipeWire(pipewire-pulse) PC: 출력 장치 9개와 소리를 내는 앱(AyuGram, Discord 등)이 덱의 음량 믹서에 나타나고, 실제 재생에 맞춰 레벨 미터가 움직임. 무음 시험 스트림(`pw-play`)으로 페이더 드래그 시 PC 음량이 100% → 47%, 음소거 버튼으로 음소거, 출력 장치 버튼으로 선택 창(9개 장치, 지금 장치 인디케이터) 확인. 앱 이름이 없는 PipeWire 스트림은 클라이언트 속성으로 이름을 찾음(`.AyuGram-wrapped` → `AyuGram`). **출력 장치 변경은 Easy Effects의 전체 출력 처리가 켜진 PC에서는 곧바로 Easy Effects Sink로 되돌아간다**(pactl로 직접 옮겨도 같다. 그런 PC에서는 앱의 출력 장치를 Easy Effects에서 정해야 한다). 기본 출력 장치 변경은 사용 중인 PC의 설정이라 시험하지 않았다 |
 | 명령 버튼 | PC에 명령 등록 후 허용 시 덱 추가 메뉴에 노출, 버튼 탭으로 PC에서 명령 실행(파일 생성). 권한 해제 시 흐려지며 미실행 |
 | 스위치·노브 | PC에 스위치, 단계(4개), 범위(0~100, 단위 5) 등록(파일 읽기/쓰기 커맨드). 덱 추가 메뉴에 위젯 종류별 호환 명령만 노출. 덱에서 스위치 탭, 단계 노브 탭·드래그, 연속 노브 드래그 시 PC 파일 값 변경 및 덱 표시 연동. PC 파일 직접 수정 시 2초 내에 덱 위젯에 반영. 권한 해제 시 셋 다 흐려지며 조작해도 PC 파일 변화 없음 |
 | 절전·웨이크업 | PC에서 `toss-connector sleep` → 덱 슬립(SSH 무응답) → `toss-connector wake` → 웨이크업. 덱 설정 `Sleep` → 슬립 → PC에서 웨이크업. 안전장치 RTC 알람(120초)보다 훨씬 빠른 15~17초 만에 깨어나 매직 패킷 동작 확인. 복귀 후 PC 자동 재연결 |

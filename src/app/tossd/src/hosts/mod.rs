@@ -20,6 +20,9 @@
 //! UI에 전달할 때마다 경과 시간만큼 보정한 `position_ms`를 계산해 넘긴다(이후 실시간 카운트는 UI 측에서 처리).
 //! 앨범 아트는 `Blob` 청크로 수신되며, 모든 청크가 모이면 해당 호스트의 `art` 필드로 UI에 전달한다.
 //!
+//! 음량 믹서 상태(`audio`)와 레벨(`audio_levels`)도 각자의 채널(`Events::audio`, `Events::audio_levels`)로 알린다.
+//! 레벨은 배치에 그 호스트를 가리키는 음량 믹서가 있을 때만 구독하므로(`Watch`의 `audio`), 구독하지 않는 호스트의 레벨은 비운다.
+//!
 //! 호스트에 등록된 스위치/노브의 값(`command_value`)은 호스트 목록과 별도 채널(`Events::values`)로 알린다 —
 //! 노브 조작 중 값이 빈번하게 바뀔 때마다 앨범 아트 등이 포함된 `HostsState` 전체를 다시 보내지 않기 위함이다.
 //!
@@ -42,7 +45,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use toss_proto::secure::{Conn, Identity};
-use toss_proto::{CommandInfo, DeckMsg, Media, MetricInfo, DENIED_FORGOTTEN};
+use toss_proto::{Audio, CommandInfo, DeckMsg, Media, MetricInfo, DENIED_FORGOTTEN};
 
 use blob::Blob;
 use pairing::Pending;
@@ -95,6 +98,26 @@ pub type Values = BTreeMap<String, BTreeMap<String, f64>>;
 /// 호스트 시스템 자원: `호스트 ID -> (메트릭 목록, 현재 값 맵)`. 온라인이면서 메트릭을 제공하는 호스트만 포함된다.
 pub type Meters = BTreeMap<String, (Vec<MetricInfo>, BTreeMap<String, f64>)>;
 
+/// 호스트의 음량 믹서 상태: `호스트 ID -> 상태`. 온라인이면서 상태를 보낸 호스트만 포함된다(`toss-proto`의 `Audio`).
+pub type Audios = BTreeMap<String, Audio>;
+
+/// 음량 믹서의 레벨 미터 값(0~1): 앱 ID와 출력 장치 ID마다 마지막으로 받은 값
+#[derive(Serialize, Clone, PartialEq, Debug, Default)]
+pub struct Levels {
+    pub apps: BTreeMap<String, f64>,
+    pub outputs: BTreeMap<String, f64>,
+}
+
+/// 호스트별 레벨: `호스트 ID -> 레벨`. 덱이 구독 중인(배치에 음량 믹서가 있는) 호스트만 포함된다.
+pub type AudioLevels = BTreeMap<String, Levels>;
+
+/// 호스트에 알리는 구독(`DeckMsg::Watch`): 표시 중인 메트릭과 음량 레벨 구독 여부
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct Watch {
+    pub metrics: Vec<String>,
+    pub audio: bool,
+}
+
 /// 호스트가 전송한 이미지 데이터. `data`는 base64 문자열 그대로이며 UI에서 `data:` URI로 렌더링한다.
 #[derive(Serialize, Clone, PartialEq, Debug)]
 pub struct Art {
@@ -132,6 +155,10 @@ pub trait Events: Send + Sync {
     fn values(&self, values: Values);
     /// 호스트 메트릭 목록 또는 값 변경(모든 호스트 전체 맵)
     fn meters(&self, meters: Meters);
+    /// 음량 믹서 상태 변경(모든 호스트 전체 맵)
+    fn audio(&self, audio: Audios);
+    /// 음량 레벨 변경(모든 호스트 전체 맵)
+    fn audio_levels(&self, levels: AudioLevels);
     /// 위젯이 요청한 액션에 대한 호스트 응답(요청 위젯 ID, 성공 여부, 실패 사유)
     fn result(&self, widget: u32, ok: bool, error: String);
     /// 호스트가 덱 절전을 요청함. 진입 불가 시 사유 코드(`toss-proto`의 `SLEEP_*`)를 반환한다.
@@ -154,13 +181,16 @@ struct Entry {
     /// 이 호스트에서 측정 가능한 메트릭 목록과 현재 구독 중인 메트릭의 최신 값
     metrics: Vec<MetricInfo>,
     metric_values: BTreeMap<String, f64>,
+    /// 음량 믹서 상태와 레벨
+    audio: Option<Audio>,
+    levels: Levels,
     /// 응답 대기 중인 액션 맵(`액션 ID -> 요청 위젯 ID`). 응답은 해당 액션을 보낸 호스트의 것만 매칭한다.
     asked: HashMap<u64, u32>,
 }
 
 impl Entry {
     fn new(id: String, name: String, os: String) -> Self {
-        Self { info: HostInfo::offline(id, name, os), session: 0, conn: None, media_at: Instant::now(), blob: None, values: BTreeMap::new(), metrics: Vec::new(), metric_values: BTreeMap::new(), asked: HashMap::new() }
+        Self { info: HostInfo::offline(id, name, os), session: 0, conn: None, media_at: Instant::now(), blob: None, values: BTreeMap::new(), metrics: Vec::new(), metric_values: BTreeMap::new(), audio: None, levels: Levels::default(), asked: HashMap::new() }
     }
 
     /// 세션 종료 또는 교체 시 런타임 상태를 초기화한다(키, 이름, OS 정보만 유지).
@@ -170,6 +200,8 @@ impl Entry {
         self.values.clear();
         self.metrics.clear();
         self.metric_values.clear();
+        self.audio = None;
+        self.levels = Levels::default();
         self.asked.clear();
     }
 
@@ -185,8 +217,8 @@ impl Entry {
 
 struct Inner {
     entries: Vec<Entry>,
-    /// 모니터링 중인 호스트 메트릭: `호스트 ID -> 메트릭 ID 목록`(배치 내 자원 미터 위젯에서 파생, `set_watch`)
-    watch: BTreeMap<String, Vec<String>>,
+    /// 호스트별 구독: 메트릭 ID 목록과 음량 레벨 구독 여부(배치 내 자원 미터·음량 믹서 위젯에서 파생, `set_watch`)
+    watch: BTreeMap<String, Watch>,
     pairing_until: Option<Instant>,
     pending: Option<Pending>,
 }
@@ -222,10 +254,19 @@ impl Hosts {
         self.events.meters(inner.entries.iter().filter(|e| !e.metrics.is_empty()).map(|e| (e.info.id.clone(), (e.metrics.clone(), e.metric_values.clone()))).collect());
     }
 
-    /// 덱이 모니터링 중인 호스트 메트릭 목록이 변경되었을 때(배치 수정 시) 변경된 호스트에만 `Watch`를 전송해 해당 항목만 측정하게 한다.
-    /// 호출 측(`state.rs`의 `edit_layout`)에서 직렬화를 보장해야 한다.
-    pub fn set_watch(&self, watch: BTreeMap<String, Vec<String>>) {
-        let changed: Vec<(Arc<Conn>, Vec<String>)> = {
+    fn publish_audio(&self, inner: &Inner) {
+        self.events.audio(inner.entries.iter().filter_map(|e| Some((e.info.id.clone(), e.audio.clone()?))).collect());
+    }
+
+    fn publish_levels(&self, inner: &Inner) {
+        let watched = |e: &&Entry| inner.watch.get(&e.info.id).is_some_and(|w| w.audio) && e.audio.is_some();
+        self.events.audio_levels(inner.entries.iter().filter(watched).map(|e| (e.info.id.clone(), e.levels.clone())).collect());
+    }
+
+    /// 덱이 모니터링 중인 호스트 메트릭 목록이나 음량 레벨 구독이 변경되었을 때(배치 수정 시) 변경된 호스트에만 `Watch`를 전송해
+    /// 해당 항목만 측정하게 한다. 호출 측(`state.rs`의 `edit_layout`)에서 직렬화를 보장해야 한다.
+    pub fn set_watch(&self, watch: BTreeMap<String, Watch>) {
+        let changed: Vec<(Arc<Conn>, Watch)> = {
             let mut inner = self.inner.lock().unwrap();
             let changed = inner
                 .entries
@@ -233,11 +274,17 @@ impl Hosts {
                 .filter(|e| inner.watch.get(&e.info.id) != watch.get(&e.info.id))
                 .filter_map(|e| Some((e.conn.clone()?, watch.get(&e.info.id).cloned().unwrap_or_default())))
                 .collect();
+            for e in &mut inner.entries {
+                if !watch.get(&e.info.id).is_some_and(|w| w.audio) {
+                    e.levels = Levels::default();
+                }
+            }
             inner.watch = watch;
+            self.publish_levels(&inner);
             changed
         };
-        for (conn, metrics) in changed {
-            let _ = conn.send(&DeckMsg::Watch { metrics });
+        for (conn, w) in changed {
+            let _ = conn.send(&DeckMsg::Watch { metrics: w.metrics, audio: w.audio });
         }
     }
 
@@ -288,6 +335,8 @@ impl Hosts {
             self.publish(&inner);
             self.publish_values(&inner);
             self.publish_meters(&inner);
+            self.publish_audio(&inner);
+            self.publish_levels(&inner);
             gone
         };
         self.save();

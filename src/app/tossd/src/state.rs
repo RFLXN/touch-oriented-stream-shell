@@ -139,6 +139,9 @@ pub struct Shared {
     /// 시스템 자원: 측정 가능한 메트릭 목록과 현재 값. 키는 덱 자신(`SELF_HOST`) 또는 호스트 ID다.
     pub meter_infos: Versioned<MeterInfos>,
     pub meter_values: Versioned<MeterValues>,
+    /// 호스트의 음량 믹서 상태와 레벨(레벨은 배치에 음량 믹서가 있는 호스트만)
+    pub audio: Versioned<hosts::Audios>,
+    pub audio_levels: Versioned<hosts::AudioLevels>,
     /// 덱 자체 자원 중 자원 미터 위젯이 현재 표시 중인 항목(이 항목만 측정한다)
     own_watch: Mutex<Vec<String>>,
     /// 위젯 배치. UI 편집 모드에서 수정한다(`edit_layout`)
@@ -182,7 +185,7 @@ impl Shared {
                     None
                 }
             };
-            (true, (accepted, layout.watched(), layout.icon_urls(), layout.wants_spotify()))
+            (true, (accepted, (layout.watched(), layout.audio_hosts()), layout.icon_urls(), layout.wants_spotify()))
         });
         if let Some(layout) = accepted {
             self.layout_store.save(&layout);
@@ -212,11 +215,16 @@ impl Shared {
         self.layout.update(|_| true);
     }
 
-    /// 자원 미터 위젯이 표시 중인 항목을 갱신한다: 덱 항목은 자체 측정 스레드에, 호스트 항목은 해당 호스트에 전달한다.
-    fn watch(&self, mut watched: BTreeMap<String, Vec<String>>) {
+    /// 자원 미터 위젯이 표시 중인 항목과 음량 믹서가 가리키는 호스트를 갱신한다: 덱 항목은 자체 측정 스레드에,
+    /// 호스트 항목(메트릭과 음량 레벨 구독)은 해당 호스트에 전달한다.
+    fn watch(&self, (mut watched, audio): (BTreeMap<String, Vec<String>>, Vec<String>)) {
         *self.own_watch.lock().unwrap() = watched.remove(SELF_HOST).unwrap_or_default();
+        let mut all: BTreeMap<String, hosts::Watch> = watched.into_iter().map(|(host, metrics)| (host, hosts::Watch { metrics, audio: false })).collect();
+        for host in audio {
+            all.entry(host).or_default().audio = true;
+        }
         if let Some(hosts) = self.hosts_ctl.get() {
-            hosts.set_watch(watched);
+            hosts.set_watch(all);
         }
     }
 
@@ -348,6 +356,14 @@ impl hosts::Events for Shared {
         self.meter_values.update(|cur| replace_hosts(cur, values));
     }
 
+    fn audio(&self, audio: hosts::Audios) {
+        self.audio.set(audio);
+    }
+
+    fn audio_levels(&self, levels: hosts::AudioLevels) {
+        self.audio_levels.set(levels);
+    }
+
     fn result(&self, widget: u32, ok: bool, error: String) {
         self.set_result(widget, ok, error);
     }
@@ -410,7 +426,7 @@ pub fn spawn_feeds(shared: &Arc<Shared>, wpa_ctrl: PathBuf, host: Option<(Socket
     }
     let (watched, icons, spotify) = {
         let layout = shared.layout.lock();
-        (layout.watched(), layout.icon_urls(), layout.wants_spotify())
+        ((layout.watched(), layout.audio_hosts()), layout.icon_urls(), layout.wants_spotify())
     };
     shared.watch(watched);
     shared.want_icons(icons);

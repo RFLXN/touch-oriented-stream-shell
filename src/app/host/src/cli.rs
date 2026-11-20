@@ -341,3 +341,46 @@ pub fn command(cmds: &Commands, dir: &std::path::Path, rest: &[String], tail: &[
         Some(other) => usage(&format!("알 수 없는 명령: command {other}")),
     }
 }
+
+/// `toss-connector audio [levels]`: 덱에 보낼 음량 믹서 상태를 출력한다. `levels`면 이어서 레벨을 계속 출력한다(Ctrl+C로 종료).
+pub fn audio(levels: bool) {
+    use crate::audio::{Event, Mixer};
+    let (tx, rx) = std::sync::mpsc::channel();
+    let _mixer = Mixer::start(levels, move |e| {
+        let _ = tx.send(e);
+    });
+    let state = loop {
+        match rx.recv_timeout(Duration::from_secs(5)) {
+            Ok(Event::State(s)) => break s,
+            Ok(Event::Levels { .. }) => {}
+            Err(_) => fail("음량 믹서가 응답하지 않습니다"),
+        }
+    };
+    let Some(state) = state else { fail("오디오 서버(PulseAudio 또는 pipewire-pulse)에 연결할 수 없습니다") };
+    let pct = |v: f64| format!("{:>3}%", (v * 100.0).round());
+    println!("출력 장치:");
+    for o in &state.outputs {
+        println!("  {} {} {}{}  {}", if o.default { "*" } else { " " }, pct(o.volume), if o.muted { "음소거 " } else { "" }, o.title, o.id);
+    }
+    println!("앱:");
+    for a in &state.apps {
+        let out = state.outputs.iter().find(|o| o.id == a.output).map_or("(여러 장치)", |o| o.title.as_str());
+        println!("    {} {}{} [{}] -> {}  (스트림 {})", pct(a.volume), if a.muted { "음소거 " } else { "" }, a.name, a.id, out, a.streams);
+    }
+    if !levels {
+        return;
+    }
+    let mut now: std::collections::BTreeMap<String, f64> = Default::default();
+    loop {
+        match rx.recv() {
+            Ok(Event::Levels { apps, outputs }) => {
+                now.extend(apps);
+                now.extend(outputs.into_iter().map(|(k, v)| (format!("@{k}"), v)));
+                let line: Vec<String> = now.iter().filter(|(_, v)| **v > 0.0).map(|(k, v)| format!("{k} {:.2}", v)).collect();
+                println!("{}", if line.is_empty() { "-".to_string() } else { line.join("  ") });
+            }
+            Ok(Event::State(_)) => {}
+            Err(_) => return,
+        }
+    }
+}

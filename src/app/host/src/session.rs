@@ -1,16 +1,17 @@
 //! 단일 덱 연결 세션 처리(연결이 끊길 때까지 실행).
 //!
 //!   - 호스트 상태를 이벤트 기반으로 덱에 전송: 재생 정보·앨범 아트, 등록된 명령 목록과 스위치·노브 값,
-//!     측정 가능한 리소스 목록과 덱이 구독 중인 리소스 값.
+//!     측정 가능한 리소스 목록과 덱이 구독 중인 리소스 값, 음량 믹서 상태와 덱이 구독 중일 때의 레벨(`audio.rs`).
 //!     재생 중 경과 시간은 보내지 않고 덱이 자체 계산하며, 전송 여부는 호스트가 판단한다(media::changed).
-//!   - 덱의 액션 요청 처리: 미디어 제어, 등록된 명령 실행 및 값 설정(덱은 등록 목록 중에서만 선택 가능), 웹페이지 열기(`web.rs`).
+//!   - 덱의 액션 요청 처리: 미디어 제어, 음량·음소거·출력 장치 변경, 등록된 명령 실행 및 값 설정(덱은 등록 목록 중에서만 선택 가능),
+//!     웹페이지 열기(`web.rs`).
 //!   - 웹 콘솔과 CLI의 덱 금고 요청 중계(`vault.rs`): 덱에 보내고 응답을 요청한 쪽에 돌려주며, 덱이 알려 준 금고 상태를 기록한다.
 //!
 //! 모든 작업은 해당 덱의 권한(Policy) 내에서만 수행한다.
 //! 특히 액션 처리 시 매 요청마다 설정 파일을 새로 읽어 권한을 검증해, 방금 해제한 권한이 실행되는 틈을 막는다.
 //! 허용되지 않은 요청은 거절하고 로그에 기록한다.
 //!
-//! 단일 이벤트 루프 스레드가 Wake 이벤트를 받아 처리하며, 송신 피드는 MediaFeed·CommandFeed·MeterFeed 세 갈래로 나뉘어
+//! 단일 이벤트 루프 스레드가 Wake 이벤트를 받아 처리하며, 송신 피드는 MediaFeed·CommandFeed·MeterFeed·AudioFeed 네 갈래로 나뉘어
 //! 각자 직전 전송 상태를 추적한다. Keep-alive ping은 별도 스레드에서 전송해 느린 플레이어나 커맨드에 블로킹되어도 연결이 끊기지 않는다.
 
 use std::collections::HashMap;
@@ -24,8 +25,8 @@ use std::time::{Duration, Instant};
 use base64::Engine;
 use toss_proto::secure::{Conn, MAX_PLAIN};
 use toss_proto::{
-    CommandInfo, DeckMsg, HostMsg, Media, VaultService, ACTION_COMMAND_RUN, ACTION_COMMAND_SET, ACTION_WEB_OPEN, BLOB_CHUNK, CAP_COMMAND_RUN, CAP_MEDIA_CONTROL, CAP_MEDIA_INFO, CAP_RESOURCE_INFO, CAP_WEB_OPEN,
-    ERROR_NOT_ALLOWED,
+    CommandInfo, DeckMsg, HostMsg, Media, VaultService, ACTION_AUDIO_DEFAULT, ACTION_AUDIO_MUTE, ACTION_AUDIO_ROUTE, ACTION_AUDIO_VOLUME, ACTION_COMMAND_RUN, ACTION_COMMAND_SET, ACTION_WEB_OPEN, BLOB_CHUNK,
+    CAP_AUDIO_CONTROL, CAP_AUDIO_INFO, CAP_COMMAND_RUN, CAP_MEDIA_CONTROL, CAP_MEDIA_INFO, CAP_RESOURCE_INFO, CAP_WEB_OPEN, ERROR_NOT_ALLOWED,
 };
 
 use crate::commands::{self, Commands};
@@ -33,7 +34,7 @@ use crate::link::{explain, start_pings, why_lost, Attached};
 use crate::media::MediaControl;
 use crate::store::Store;
 use crate::trust::{self, Choices};
-use crate::{art, jsonfile, managed, media, meter, vault, web};
+use crate::{art, audio, jsonfile, managed, media, meter, vault, web};
 
 /// 권한 설정 및 명령 목록 파일 변경 확인 주기
 const POLL_EVERY: Duration = Duration::from_millis(500);
@@ -44,10 +45,12 @@ const SETTLE: Duration = Duration::from_millis(40);
 /// 앨범 아트 다운로드 실패 시 같은 이미지에 대해 재시도할 최대 횟수
 const ART_TRIES: u32 = 3;
 
-/// 현재 호스트 환경에서 실제로 지원 가능한 기능인지 확인(권한이 켜져 있어도 불가능한 기능은 광고하지 않음)
+/// 현재 호스트 환경에서 실제로 지원 가능한 기능인지 확인(권한이 켜져 있어도 불가능한 기능은 광고하지 않음).
+/// 음량 믹서는 리눅스에서 광고한다(오디오 서버가 없으면 상태가 null이다). 테스트에서는 PC의 실제 오디오 서버에 붙지 않도록 끈다.
 pub fn can(has_media: bool, cap: &str) -> bool {
     match cap {
         CAP_MEDIA_INFO | CAP_MEDIA_CONTROL => has_media,
+        CAP_AUDIO_INFO | CAP_AUDIO_CONTROL => cfg!(all(target_os = "linux", not(test))),
         CAP_COMMAND_RUN => true,
         CAP_RESOURCE_INFO => cfg!(target_os = "linux"),
         CAP_WEB_OPEN => cfg!(any(target_os = "linux", target_os = "macos")),
@@ -115,10 +118,12 @@ enum Wake {
     Art(String, Result<art::Art, String>),
     /// 스위치·노브 명령 상태 값 변경 (명령 ID, 값)
     Value(String, Option<f64>),
-    /// 덱의 리소스 구독 목록 변경
-    Watch(Vec<String>),
+    /// 덱의 구독 변경 (리소스 ID 목록, 음량 레벨 구독 여부)
+    Watch(Vec<String>, bool),
     /// 리소스 측정 스레드 이벤트 (카탈로그 또는 값 변경)
     Meter(meter::Event),
+    /// 음량 믹서 스레드 이벤트 (상태 또는 레벨 변경)
+    Audio(audio::Event),
     /// 웹 콘솔이나 CLI가 보낸 금고 요청 (덱에 전달하고 응답을 기다린다)
     Vault(vault::Call),
     /// 금고 요청에 대한 덱의 응답 (요청 번호, 결과)
@@ -371,6 +376,62 @@ impl MeterFeed {
     }
 }
 
+/// 음량 믹서 상태와 레벨 전송 피드
+#[derive(Default)]
+struct AudioFeed {
+    /// 음량 믹서 스레드 (audio.info 권한이 있을 때만 활성)
+    mixer: Option<audio::Mixer>,
+    /// 덱이 레벨을 구독 중인지
+    watch: bool,
+    /// 상태를 보낸 적이 있는지 (권한 해제 시 null로 지우기 위해 추적)
+    sent: bool,
+}
+
+impl AudioFeed {
+    fn on_watch(&mut self, on: bool) {
+        self.watch = on;
+        if let Some(m) = &self.mixer {
+            m.watch(on);
+        }
+    }
+
+    fn on_event(&mut self, event: audio::Event, conn: &Conn) -> io::Result<()> {
+        if self.mixer.is_none() {
+            return Ok(());
+        }
+        conn.send(&match event {
+            audio::Event::State(audio) => {
+                self.sent = true;
+                HostMsg::Audio { audio }
+            }
+            audio::Event::Levels { apps, outputs } => HostMsg::AudioLevels { apps, outputs },
+        })
+    }
+
+    fn act(&self, name: &str, args: &serde_json::Value) -> Result<(), String> {
+        match &self.mixer {
+            Some(m) => m.act(name, args),
+            None => Err("이 PC에서 음량 정보 공유가 꺼져 있습니다".to_string()),
+        }
+    }
+
+    /// 권한 활성화 시 믹서 시작, 비활성화 시 중지 및 덱 측 상태 초기화
+    fn poll(&mut self, allowed: bool, conn: &Conn, tx: &Sender<Wake>) -> io::Result<()> {
+        if allowed && self.mixer.is_none() {
+            let tx = Mutex::new(tx.clone());
+            self.mixer = Some(audio::Mixer::start(self.watch, move |event| {
+                let _ = tx.lock().unwrap().send(Wake::Audio(event));
+            }));
+        } else if !allowed && self.mixer.is_some() {
+            self.mixer = None;
+            if std::mem::take(&mut self.sent) {
+                conn.send(&HostMsg::Audio { audio: None })?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// 단일 덱 연결 세션 상태
 struct Session<'a> {
     conn: Arc<Conn>,
@@ -382,6 +443,7 @@ struct Session<'a> {
     playing: MediaFeed,
     commands: CommandFeed,
     meters: MeterFeed,
+    sound: AudioFeed,
     next_poll: Instant,
     next_read: Instant,
     /// 덱의 응답을 기다리는 금고 요청 (요청 번호 -> 응답 채널)
@@ -404,6 +466,7 @@ impl Session<'_> {
         }
         let done = match name {
             ACTION_COMMAND_RUN | ACTION_COMMAND_SET => self.commands.act(name, args),
+            ACTION_AUDIO_VOLUME | ACTION_AUDIO_MUTE | ACTION_AUDIO_ROUTE | ACTION_AUDIO_DEFAULT => self.sound.act(name, args),
             ACTION_WEB_OPEN => {
                 let url = args["url"].as_str().unwrap_or_default();
                 web::open(url).inspect(|()| eprintln!("웹페이지 열기: {url}"))
@@ -430,8 +493,12 @@ impl Session<'_> {
             Ok(Wake::Changed) => self.next_read = self.next_read.min(Instant::now() + SETTLE),
             Ok(Wake::Art(url, got)) => self.playing.on_art(url, got, self.policy.allows(CAP_MEDIA_INFO), &self.conn)?,
             Ok(Wake::Value(id, value)) => self.commands.on_value(id, value, &self.conn)?,
-            Ok(Wake::Watch(ids)) => self.meters.on_watch(ids),
+            Ok(Wake::Watch(ids, audio)) => {
+                self.meters.on_watch(ids);
+                self.sound.on_watch(audio);
+            }
             Ok(Wake::Meter(event)) => self.meters.on_event(event, &self.conn)?,
+            Ok(Wake::Audio(event)) => self.sound.on_event(event, &self.conn)?,
             Ok(Wake::Vault(call)) => {
                 let id = self.next_vault;
                 self.next_vault += 1;
@@ -464,6 +531,7 @@ impl Session<'_> {
                 self.commands.stamp = None;
             }
             self.meters.poll(self.policy.allows(CAP_RESOURCE_INFO) && can(has_media, CAP_RESOURCE_INFO), &self.conn, &self.tx)?;
+            self.sound.poll(self.policy.allows(CAP_AUDIO_INFO) && can(has_media, CAP_AUDIO_INFO), &self.conn, &self.tx)?;
             self.commands.poll(self.policy.allows(CAP_COMMAND_RUN), &self.conn, &self.tx)?;
         }
         if now >= self.next_read {
@@ -485,7 +553,7 @@ pub fn session(a: Attached, media: &mut Option<Box<dyn MediaControl>>, store: &S
         let why = loop {
             let wake = match read_conn.recv::<DeckMsg>(&mut reader) {
                 Ok(Some(DeckMsg::Action { id, name, args })) => Wake::Action(id, name, args),
-                Ok(Some(DeckMsg::Watch { metrics })) => Wake::Watch(metrics.into_iter().filter(|m| m.len() <= 64).take(256).collect()),
+                Ok(Some(DeckMsg::Watch { metrics, audio })) => Wake::Watch(metrics.into_iter().filter(|m| m.len() <= 64).take(256).collect(), audio),
                 Ok(Some(DeckMsg::VaultReply { id, ok, error, data })) => Wake::VaultReply(id, if ok { Ok(data) } else { Err(error.chars().filter(|c| !c.is_control()).take(300).collect()) }),
                 Ok(Some(DeckMsg::VaultState { services })) => Wake::VaultState(services.into_iter().take(16).collect()),
                 Ok(Some(DeckMsg::Denied { reason })) => break explain(&reason).to_string(),
@@ -520,6 +588,7 @@ pub fn session(a: Attached, media: &mut Option<Box<dyn MediaControl>>, store: &S
         playing: MediaFeed::default(),
         commands,
         meters: MeterFeed::default(),
+        sound: AudioFeed::default(),
         next_poll: Instant::now(),
         next_read: Instant::now(),
         vault_calls: HashMap::new(),
@@ -941,7 +1010,7 @@ mod tests {
         }
         reader.set_read_timeout(Some(Duration::from_secs(8))).unwrap();
 
-        conn.send(&DeckMsg::Watch { metrics: vec!["mem".into(), "nope".into()] }).unwrap();
+        conn.send(&DeckMsg::Watch { metrics: vec!["mem".into(), "nope".into()], audio: false }).unwrap();
         let HostMsg::MetricValues { values } = next_meter(&conn, &mut reader) else { panic!("MetricValues 메시지가 아님") };
         assert_eq!(values.keys().collect::<Vec<_>>(), ["mem"]);
         assert!(values["mem"] > 0.0);

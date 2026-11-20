@@ -446,7 +446,7 @@ src/scripts/tf-ssh.sh '/root/myapp'
 2. **화면 환경**: 부팅 시 컴포지터와 앱 자동 실행. GPU 가속 및 터치 정상 동작.
 3. **앱 아키텍처**: Rust 데몬과 QML UI 분리 통신. 상태와 로직은 데몬이, 렌더링은 UI가 담당(3.16절).
 4. **전역 스타일과 화면 구조**: 하드웨어 장비 톤을 따른 스타일, 4×6 타일 그리드 위에 랙과 복합 위젯 배치. 용어와 스타일 규칙은 3.16절 참고.
-5. **위젯과 레이아웃 편집**: 미디어 제어, 리소스 미터(덱 자체 및 PC), 랙과 명령 위젯(버튼, 스위치, 노브). 레이아웃은 기기에서 직접 편집해 저장(3.16절). 위젯 추가 방법은 3.17절 참고.
+5. **위젯과 레이아웃 편집**: 미디어 제어, 음량 믹서, 리소스 미터(덱 자체 및 PC), 랙과 명령 위젯(버튼, 스위치, 노브). 레이아웃은 기기에서 직접 편집해 저장(3.16절). 위젯 추가 방법은 3.17절 참고.
 6. **설정**: 화면 밝기, 테마, 글래스 효과, Wi-Fi 접속(3.15절), SSH 토글, 페어링, 절전, 전원 끄기.
 7. **PC 연동**: 페어링, 암호화, 호스트 권한 제어, 재생 정보·제어, 리소스 모니터링, 등록 명령(실행, 스위치, 노브), 절전·웨이크업([04-host-link.md](04-host-link.md)).
 8. **PC 커넥터**: `toss-connector`, 웹 콘솔, NixOS 모듈(설치, 자동 실행, 권한·명령 선언적 관리).
@@ -583,7 +583,7 @@ MAC 주소는 `/etc/tossfront/eth0.mac`에 적힌 값으로 부팅 시 고정된
 
 | 기능 | 내용 | 상세 설명 |
 |---|---|---|
-| 위젯 | 미디어 제어(4×2), 리소스 미터(덱 자체 및 PC의 CPU·메모리·GPU·디스크·네트워크·온도, 크기 4종), 랙과 내부 명령 위젯 4종(버튼, 스위치, 단계 노브, 연속 노브), 웹페이지 버튼 2종(일반, 사이트 아이콘) | 아래 "앱과 위젯" |
+| 위젯 | 미디어 제어(4×2), 음량 믹서(PC의 앱별 음량·레벨 미터·출력 장치, 크기 6종), 리소스 미터(덱 자체 및 PC의 CPU·메모리·GPU·디스크·네트워크·온도, 크기 4종), 랙과 내부 명령 위젯 4종(버튼, 스위치, 단계 노브, 연속 노브), 웹페이지 버튼 2종(일반, 사이트 아이콘) | 아래 "앱과 위젯" |
 | 레이아웃 | 페이지당 4×6 타일. 기기에서 직접 편집해 기기에 저장. 초기 레이아웃은 1페이지에 미디어 제어와 리소스 미터(덱 자체 온도, 메모리, 로드) 배치 | 아래 "레이아웃 편집" |
 | 설정 | 화면 밝기, 테마, 글래스 효과, Wi-Fi, SSH 켜고 끄기, 페어링, 외부 연동 키(덱 금고) 상태와 PC별 허용, 레이아웃 편집·초기화, 절전, 전원 끄기 | 아래 "UI 구성" |
 | PC 연동 | 페어링된 PC의 재생 정보 표시 및 제어. PC 리소스 사용량 표시. 등록된 명령 실행 및 스위치·노브 조작. PC 브라우저에서 웹페이지 열기. 외부 연동 키를 덱에 보관하고 PC에 토큰만 빌려주기(Discord). PC에서 덱 슬립·웨이크업 제어 | [04-host-link.md](04-host-link.md) |
@@ -629,7 +629,7 @@ MAC 주소는 `/etc/tossfront/eth0.mac`에 적힌 값으로 부팅 시 고정된
 | 버튼 위젯 | 랙 슬롯에 놓이는 소형 위젯: 버튼이나 노브 1개와 하단 라벨. **반드시 랙 내부에만 배치됨** | `form: "button"`, `CommandWidget` 등(공통 베이스 `CommandBase`) |
 | 스위치 버튼 위젯 | 온/오프 상태를 갖는 버튼 위젯. 켜져 있으면 버튼이 눌린 상태를 유지하고 인디케이터가 점등됨 | `kind: "command.switch"`, `CommandSwitchWidget` |
 | 노브 위젯 | 노브 1개로 구성된 버튼 위젯. 단계 노브(고정 단계 선택)와 연속 노브(범위 내 값 조절)가 있음. 라벨 아래에 현재 값 표시 | `kind: "command.stepped"`, `"command.linear"` |
-| 복합 위젯 | 단일 버튼으로 표현할 수 없는 위젯. 위젯 프레임 안에 아래 컴포넌트를 조합해 구성. **자체가 랙과 동격으로 페이지에 놓이며 다른 위젯을 자식으로 담지 않음** | `MediaWidget`, `MeterWidget` |
+| 복합 위젯 | 단일 버튼으로 표현할 수 없는 위젯. 위젯 프레임 안에 아래 컴포넌트를 조합해 구성. **자체가 랙과 동격으로 페이지에 놓이며 다른 위젯을 자식으로 담지 않음** | `MediaWidget`, `MixerWidget`, `MeterWidget` |
 | 버튼 (컴포넌트) | 누를 수 있는 인터랙티브 요소. 토글 상태가 있는 경우(스위치 버튼) 켜진 동안 반쯤 눌린 상태 유지(`held`) | `kit/Button`, 분리된 라벨 포함 버전은 `kit/LabeledButton` |
 | 노브 (컴포넌트) | 돌려 값을 조절하는 원형 컨트롤. 터치 화면에서는 직선 드래그로 조작 | `kit/Knob` |
 | 디스플레이 (컴포넌트) | 다양한 정보를 자유롭게 출력하는 표시 창 | `kit/Display` |
@@ -641,12 +641,13 @@ UI와 데몬을 합친 프로그램 전체는 "스트림덱 앱"으로 부른다
 
 ### 앱과 위젯
 
-사용자가 추가할 수 있는 위젯은 4개 앱의 위젯 종류 11가지다(데몬 `catalog`). 앱 선택 → 위젯 종류 선택 → 위젯 설정 순서로 추가한다.
+사용자가 추가할 수 있는 위젯은 5개 앱의 위젯 종류 17가지다(데몬 `catalog`). 앱 선택 → 위젯 종류 선택 → 위젯 설정 순서로 추가한다.
 
 | 앱 | 위젯 종류 | 배치 위치 | 설정 항목 | 동작 |
 |---|---|---|---|---|
 | `Media` | `media.player` | 페이지, 4×2 | 대상(`Source`): PC(미지정 시 연결된 첫 PC) 또는 `Spotify` | 재생 곡 앨범 아트·메타데이터, 진행 바, 7개 버튼(반복, 이전 곡, 5초 뒤로, 재생·일시정지, 5초 앞으로, 다음 곡, 셔플). `Spotify`를 고르면 덱이 Spotify 계정을 직접 조회하고 제어한다([04-host-link.md](04-host-link.md) 4.15절 "Spotify"). Spotify가 대상이면 키가 좋아요 / 셔플 / 이전 / 재생 / 다음 / 반복 / 대기열로 바뀌고(5초 탐색 대신 좋아요와 대기열), 다음 곡과 재생 기기 이름이 표시된다. 기기 줄을 누르면 기기 목록, 대기열 키를 누르면 대기열 창이 뜬다(`shell/SpotifySheet`). `Spotify theme`을 켜면 덱의 하드웨어풍 테마 대신 Spotify 앱의 재생 화면처럼 그린다(`widgets/SpotifyPlayer`, 아래 "Spotify 플레이어") |
 | `Media` | `media.combo` (PC + Spotify) | 페이지, 4×2 | 대상 PC | 평소에는 그 PC의 미디어 위젯이다. 그 PC가 Spotify를 재생 중이면(덱이 조회한 Spotify에 곡이 있고, PC 플레이어 이름이 `spotify`로 시작하거나 곡 제목이 같으면) Spotify로 바뀌고 버튼도 Spotify로 보낸다. `Spotify theme`(이 위젯은 처음부터 켜짐)이 켜져 있으면 Spotify 플레이어(`widgets/SpotifyPlayer`)로, 꺼져 있으면 덱 테마의 미디어 위젯에서 Spotify 기능만 쓰는 모양으로 바뀐다. 곡이 바뀔 때의 짧은 어긋남 때문에 PC 화면으로 돌아갈 때는 6초 기다린다(`shell/WidgetSlot`). 이 위젯이 있으면 덱이 Spotify를 조회한다 |
+| `Volume mixer` | `mixer.2x2`, `3x2`, `4x2`, `2x3`, `3x3`, `4x3` | 페이지, 이름과 동일한 크기 | 대상 PC(필수), 출력 장치 스트립(`Output strip`, 처음부터 켜짐) | 앱마다 세로 페이더, 레벨 미터, 음소거, 출력 장치 선택 (아래 "음량 믹서") |
 | `Resource monitor` | `monitor.2x1`, `monitor.2x2`, `monitor.4x1`, `monitor.4x2` | 페이지, 이름과 동일한 크기 | 대상 장치(덱 자신 또는 PC), 표시 메트릭(크기별 최대 3·6·6·12개) | 리소스 사용량 미터 (아래 "리소스 미터") |
 | `Command` | `command.run` | 랙 슬롯 | PC, 해당 PC에 등록된 명령, 라벨, 색상 | 버튼: 탭 시 명령 1개 실행 |
 | | `command.switch` | 랙 슬롯 | 위와 동일 | 스위치 버튼: 온/오프 전환. 상태는 PC가 보고 |
@@ -659,11 +660,33 @@ UI와 데몬을 합친 프로그램 전체는 "스트림덱 앱"으로 부른다
 - **Spotify 플레이어**(`widgets/SpotifyPlayer`): 사용자 요청으로 이 위젯만 덱의 디자인 규칙(위젯 틀, 나사, 디스플레이, 돌출 버튼, 직각 모서리)을 따르지 않는다. 둥근 어두운 카드에 앨범 아트의 대표 색에서 Spotify 검정(#121212)으로 이어지는 그라데이션을 깔고, 흰 굵은 제목, 회색 아티스트, 초록 재생 기기 줄, 가는 진행 막대(흰 채움과 손잡이), 틀 없는 아이콘 제어 줄(가운데 흰 원형 재생 버튼, 켜진 셔플·반복·좋아요는 초록과 아래 점)을 그린다. 기능과 보내는 액션은 Spotify 모드의 `MediaWidget`과 같다.
 - 상태가 없는 실행 버튼(`command.run`)에는 인디케이터가 없고, 온/오프 상태가 있는 스위치에는 있다. 노브는 라벨 아래에 현재 값을 표시한다.
 - 스위치는 추가할 때 인디케이터 색상(`Light`)을 고를 수 있다: `AUTO`(버튼 색상에 맞춤: 빨간 버튼은 빨강, 주황 버튼은 주황, 나머지는 초록), 초록, 주황, 빨강, 파랑. 위젯 설정의 `light`에 저장된다(`Theme.indicatorColors`). 이미 놓은 위젯의 설정은 바꿀 수 없으므로, 색상을 바꾸려면 위젯을 지우고 다시 추가한다.
-- UI 구현은 위젯 종류별로 `src/app/ui/widgets/` 아래 파일이 대응된다: `MediaWidget`, `MeterWidget`(리소스 미터 4종 공용), `CommandWidget`, `CommandSwitchWidget`, `CommandSteppedWidget`, `CommandLinearWidget`(명령 위젯 4종 공통 베이스 `CommandBase`). 종류와 QML 파일 매핑은 `shell/WidgetSlot`의 `sources`에 정의돼 있다.
+- UI 구현은 위젯 종류별로 `src/app/ui/widgets/` 아래 파일이 대응된다: `MediaWidget`, `MixerWidget`(음량 믹서), `MeterWidget`(리소스 미터 4종 공용), `CommandWidget`, `CommandSwitchWidget`, `CommandSteppedWidget`, `CommandLinearWidget`(명령 위젯 4종 공통 베이스 `CommandBase`). 종류와 QML 파일 매핑은 `shell/WidgetSlot`의 `sources`에 정의돼 있다.
 - 해당 PC가 미연결이거나 위젯이 쓰는 것을 제공하지 않는 상태(권한 해제, 명령 삭제)에서는 위젯이 비활성화(흐림)돼 눌리지 않는다. 명령 위젯이 가리키는 명령의 종류가 위젯과 어긋난 경우에도 비활성화된다(버튼은 `run`, 스위치는 `switch`, 노브는 `stepped`·`linear`).
 - **웹페이지 버튼은 그 PC가 `web.open` 권한을 허용했을 때만 눌린다**(기본은 꺼짐. [04-host-link.md](04-host-link.md) 4.5절). 주소는 위젯 설정에 저장되며 데몬이 `http://`, `https://` 주소만 받는다(공백·제어 문자 없이 512바이트 이하). PC도 같은 검사를 다시 한다.
 - **사이트 아이콘은 덱이 직접 가져온다**(`src/app/tossd/src/icons.rs`. 덱이 인터넷에 연결되어 있어야 한다). 페이지의 `apple-touch-icon`, `icon`, 웹 앱 매니페스트의 `icons`와 사이트 루트의 `/apple-touch-icon.png`, `/apple-touch-icon-precomposed.png`, `/favicon.ico`를 모아 크기가 큰 것부터 하나씩 받아 보고, 화면이 그릴 수 있는 이미지(PNG, JPEG, GIF, ICO)인 첫 번째 것을 쓴다. SVG와 WebP는 건너뛴다. 받은 아이콘은 `/data/toss/icons/`에 보관하고, 아직 없거나 가져오지 못했으면 지구본 모양을 그린다. 실패한 주소는 10분 뒤 다시 시도한다.
 - 새 위젯 종류 추가 방법은 3.17절을 참고한다.
+
+### 음량 믹서 (앱 Volume mixer)
+
+PC에서 소리를 내는 앱마다 스트립 하나를 두고 음량, 음소거, 출력 장치를 바꾼다. PC는 PulseAudio 서버(PipeWire면 `pipewire-pulse`)에서 이 정보를 읽는다([04-host-link.md](04-host-link.md) 4.6절 "음량 믹서").
+
+크기는 6가지이고 모양은 같다. 너비는 한 번에 보이는 스트립 수를, 높이는 페이더 길이를 정한다.
+
+| 너비 | 보이는 스트립 | | 높이 | 페이더 길이(대략) |
+|---|---|---|---|---|
+| 2칸 (`mixer.2x*`) | 3개 | | 2칸 (`mixer.*x2`) | 약 200px |
+| 3칸 (`mixer.3x*`) | 5개 | | 3칸 (`mixer.*x3`) | 약 390px |
+| 4칸 (`mixer.4x*`) | 7개 | | | |
+
+- **스트립**(위에서 아래로): 디스플레이(앱 이름, 출력 장치 이름 — 스트림들이 서로 다른 장치로 나가면 `MIXED`, 음량 % 또는 `MUTED`), 레벨 미터(디스플레이 안의 LED 눈금 `kit/LevelMeter`. 직전 0.1초의 최대 진폭을 -60~0 dB로 환산해 -18 dB까지 초록, -6 dB까지 노랑, 그 위 빨강으로 켠다. 오를 때는 바로, 내릴 때는 초당 24 dB씩 떨어지며, 가장 높은 칸 하나를 1.2초 붙잡아 둔다(피크 홀드). 꺼진 칸도 자기 색을 옅게 띤다), 페이더(`kit/Fader`, 0~100%), 버튼 두 개(음소거: 음소거 중에는 빨갛게 눌려 있음 / 출력 장치: 누르면 선택 창).
+- **출력 장치 스트립**: `Output strip`이 켜져 있으면 맨 앞에 PC의 기본 출력 장치 스트립(`OUTPUT`)을 두고 구분선을 긋는다. 이 스트립의 출력 장치 버튼은 기본 출력 장치를 바꾼다.
+- **출력 장치 선택 창**(`shell/AudioSheet`): 그 PC의 출력 장치 목록을 띄우고 지금 장치를 인디케이터로 표시한다. 앱 스트립에서 열었으면 그 앱의 모든 스트림을 고른 장치로 옮기고(`audio.route`), 출력 장치 스트립에서 열었으면 기본 출력 장치를 바꾼다(`audio.default`). 출력 장치가 하나뿐이면 버튼이 흐려진다.
+- **페이더**: 드래그 중에는 약 0.07초마다 음량을 보내고, 손을 뗄 때 최종값을 한 번 더 보낸다. 손을 뗀 뒤 0.7초 동안은 늦게 도착한 이전 값으로 손잡이가 되돌아가지 않게 손가락의 값을 유지한다. 홈을 누르면 손잡이가 그 위치로 온다.
+- **같은 앱의 스트림은 하나로 묶인다**(브라우저 탭 여러 개 등). 묶은 앱의 음량을 바꾸면 스트림마다 채널 균형을 유지한 채 가장 큰 채널이 그 값이 된다.
+- 스트립이 위젯 너비에 들어가는 수보다 많으면 옆으로 밀어 넘기고, 맨 아래에 스크롤 막대(홈과 손잡이)가 생겨 지금 보는 위치를 알린다. 다 들어가면 막대가 없고 옆으로 밀리지 않아 페이지 넘김을 방해하지 않는다.
+- **레벨은 배치에 믹서가 있는 PC만 측정한다.** 데몬이 배치에서 믹서가 가리키는 PC를 골라(`Layout::audio_hosts`) 그 PC에만 레벨을 구독한다. 위젯을 지우면 측정도 멈춘다.
+- 권한: `audio.info`가 없으면 `Not shared`, `audio.control`이 없으면 페이더와 버튼이 흐려지고 눌리지 않는다(`audio.control`은 기본으로 꺼져 있다. [04-host-link.md](04-host-link.md) 4.5절). PC가 오프라인이면 `PC offline`, PC가 오디오 서버에 붙지 못했으면 `No sound server on <PC>`, 소리를 내는 앱도 출력 장치 스트립도 없으면 `Nothing playing`이 뜬다. 라벨 줄 끝 인디케이터는 상태를 받고 있는지를 나타낸다.
+- 관련 코드: 데몬 `layout/mod.rs`(위젯 종류, `audio_hosts`)와 `hosts/session.rs`(상태·레벨 정제), UI `widgets/MixerWidget.qml`, `kit/Fader.qml`, `shell/AudioSheet.qml`.
 
 ### 리소스 미터 (앱 Resource monitor)
 
@@ -774,6 +797,8 @@ UI와 데몬을 합친 프로그램 전체는 "스트림덱 앱"으로 부른다
 | 데몬 → UI | `values` | 호스트에 등록된 스위치·노브 현재 값(호스트 ID → 명령 ID → 값). 변경 시 전체 전송 |
 | 데몬 → UI | `meters` | 수집 가능한 메트릭 목록(대상 → 목록). 대상은 `@deck`(덱 자신) 또는 호스트 ID. 리소스 미터 추가 시 선택용 |
 | 데몬 → UI | `meter_values` | 메트릭 현재 값(대상 → 메트릭 ID → 값). **배치된 리소스 미터가 구독 중인 항목만** 약 1초마다 변경 시 전송 |
+| 데몬 → UI | `audio` | 호스트의 음량 믹서 상태(호스트 ID → 출력 장치·앱 목록). 변경 시 전체 전송 |
+| 데몬 → UI | `audio_levels` | 음량 레벨(호스트 ID → 앱·출력 장치별 0~1). **배치된 음량 믹서가 가리키는 호스트만** 약 0.1초마다 변경 시 전송 |
 | 데몬 → UI | `state` | 시스템 상태: 호스트명(`host`), IP(`ip`), USB·유선·무선 링크 상태(`links`), 인터페이스별 IP·MAC·속도(`net`). 변경 시만 전송 (온도, 로드, 메모리 등 리소스 수치는 `meters`·`meter_values`로 전달) |
 | 데몬 → UI | `device` | 덱 하드웨어 제어 상태: 화면 밝기와 범위, 전원/절전 가능 여부(`can_power`), SSH 활성 여부(`ssh`) 및 제어 가능 여부(`can_ssh`). 변경 시만 전송 |
 | UI → 데몬 | `ssh` | 덱 SSH 활성화/비활성화 요청(`on`). 실제 반영 결과는 `device`의 `ssh` 필드로 회신 |
@@ -956,6 +981,7 @@ UI (`src/app/ui/`):
 | `WebButtonWidget`, `WebIconWidget` | 웹페이지 버튼, 사이트 아이콘을 그리는 웹페이지 버튼(아이콘은 `icons`에서 받음) |
 | `MediaWidget` | 미디어 제어 위젯 |
 | `SpotifyPlayer` | Spotify 플레이어 위젯: Spotify를 대상으로 `Spotify theme`을 켠 미디어 위젯. Spotify 앱의 재생 화면처럼 그린다(덱 테마를 따르지 않음) |
+| `MixerWidget` | 음량 믹서 위젯. 출력 장치 선택 창은 `shell/AudioSheet` |
 | `MeterWidget` | 리소스 미터 위젯 (4종 크기 공용) |
 
 데몬 (`src/app/tossd/src/`):
@@ -999,6 +1025,8 @@ UI (`src/app/ui/`):
 | `Blinker` | 글로벌 점멸 타이머. 여러 인디케이터와 아이콘 인디케이터의 깜빡임 위상을 동기화하며 자체 UI 요소는 없음 |
 | `Toggle` | 토글: 좌우 슬라이드 스위치. 설정 온/오프에 사용. `on`, `color`(켜짐 시 트랙 색), `tapped()`. 상태는 외부에서 바인딩 |
 | `Slider` | 슬라이더: 좌우 드래그로 연속값 조절(화면 밝기). 토글과 동일한 디자인 톤. `value`(0~1, 외부 주입), `color`, 드래그 중 `moved(값)`, 릴리스 시 `released(값)` |
+| `LevelMeter` | LED 레벨 미터: 진폭(`level`, 0~1)을 dB로 환산해 아래부터 켠다. 초록(-18 dB 아래)·노랑(-6 dB까지)·빨강, 꺼진 칸은 옅은 같은 색. 빠른 상승·느린 하강(`fall` dB/초)과 피크 홀드(`hold` ms), 음소거용 `dimmed` |
+| `Fader` | 페이더: 위아래 드래그로 연속값 조절(음량 믹서). 가는 세로 홈과 넓은 손잡이, 홈 옆 인쇄 눈금(10% 간격). `Slider`와 같은 인터페이스(`value`, `color`, `moved(값)`, `released(값)`)에 `interactive`, 손을 뗀 뒤 외부 값을 무시하는 시간 `settle`(기본 0.7초) |
 | `TextField` | 텍스트 입력 필드. 디스플레이 내부에 입력(가독성을 위해 유리 반사 제외). 탭 시 온스크린 키보드 호출. `text`, `placeholder`, `secret`(마스킹), `plain`(자동 대문자·단어 추천 끔), `accepted()`, `focusInput()`(키보드 표시), `blur()`(입력 확정: 조합 중인 단어를 `text`에 커밋하고 키보드 닫기. 버튼으로 `text`를 읽기 전에 호출) |
 | `SignalBars` | Wi-Fi 신호 세기 막대 4칸. `signal`(dBm) |
 | `IconIndicator` | 아이콘 인디케이터: 아이콘 형태 인디케이터. 라벨 없이 도형만으로 상태 표시. `name`(`Glyph` 아이콘 이름), `on`, `blink`, `color` |
@@ -1006,7 +1034,7 @@ UI (`src/app/ui/`):
 | `Marquee` | 한 줄 스크롤 텍스트. 영역을 넘치면 가로로 흐름. `running`으로 필요 시에만 활성화 |
 | `Segments` | 세그먼트 게이지 바. 디스플레이 내부에서 0~1 비율을 칸 수로 표시 |
 | `ProgressBar` | 프로그레스 바. 디스플레이 내부에서 진행률(0~1) 표시 |
-| `Glyph` | 벡터 아이콘. 버튼 위나 아이콘 인디케이터에 사용. 현재 `play`, `pause`, `prev`, `next`, `rew`, `ffwd`, `repeat`, `repeat1`, `shuffle`, `gear`, `usb`, `lan`, `wlan`, `bt`, `core`, `chevron`, `back`, `lock`, 편집용 `close`·`plus`·`grip`, 키보드용 `shift`·`backspace`·`enter`·`hide`·`globe` 내장. 추가하려면 24×24 좌표계 경로를 `fills`나 `lines`에 정의 |
+| `Glyph` | 벡터 아이콘. 버튼 위나 아이콘 인디케이터에 사용. 현재 `play`, `pause`, `prev`, `next`, `rew`, `ffwd`, `repeat`, `repeat1`, `shuffle`, `gear`, `usb`, `lan`, `wlan`, `bt`, `core`, `chevron`, `back`, `lock`, 편집용 `close`·`plus`·`grip`, 키보드용 `shift`·`backspace`·`enter`·`hide`·`globe`, Spotify용 `heart`·`hearton`·`queue`·`device`, 음량 믹서용 `speaker`·`mute` 내장. 추가하려면 24×24 좌표계 경로를 `fills`나 `lines`에 정의 |
 | `Screw` | 나사 머리 (장식용. `WidgetFrame`에서 사용) |
 
 ### 위젯이 전달받는 프로퍼티
@@ -1022,6 +1050,7 @@ UI (`src/app/ui/`):
 | `result` | 이 위젯이 요청한 액션의 마지막 결과: `seq`, `ok`, `error`, `at`(UI 수신 시각). 아직 없으면 `null`. 명령 스위치와 노브가 이 값으로 거절 여부를 판단한다(`CommandBase`: 수신 후 `Theme.tHold` 이내의 실패만 처리. 유지하던 선택값을 해제하고, 스위치는 인디케이터를 빨간색으로 점멸) |
 | `command` | 이 위젯이 가리키는 명령(설정 `command`가 해당 ID). 대상 호스트가 현재 제공 중일 때만 존재: `id`, `name`, `kind`(`run`·`switch`·`stepped`·`linear`), `steps`, `min`, `max`, `step`(0인 값은 생략). 아니면 `null` — 이때 위젯은 비활성화(흐림)돼 눌리지 않아야 한다 |
 | `value` | 해당 명령의 현재 값(호스트가 보고한 값): 스위치 0/1, 단계는 인덱스(0부터), 범위는 수치 값. 모르면 `undefined` |
+| `audio`, `levels` | 음량 믹서용. 대상 PC의 음량 믹서 상태(`outputs`, `apps`. 없으면 `null`)와 레벨(`apps`, `outputs`: ID → 0~1) |
 | `metrics`, `metricValues`, `meterSource` | 리소스 미터용. 위젯 설정 `host`가 가리키는 대상(`@deck`이면 덱 자신)에서 수집 가능한 메트릭 목록, 그 현재 값(메트릭 ID → 값. 이 위젯이 선택한 항목만 전달), 대상의 이름과 값 수신 여부(`own`, `name`, `live`) |
 
 호스트에서 오는 데이터는 `host`로 들어온다: 재생 정보(`host.media`), 앨범 아트(`host.art`), 등록된 명령 목록(`host.commands`). 자주 바뀌는 값은 따로 전달된다 — 스위치·노브 값(`value`)과 메트릭 값(`metricValues`). **호스트는 이벤트가 생겼을 때만 보낸다.** 재생 위치처럼 계속 흐르는 값은 위젯이 수신한 값을 기준으로 직접 계산한다(`MediaWidget`이 이 방식). 다른 종류의 데이터나 액션을 추가하려면 프로토콜(`src/app/proto`)에 메시지와 액션 이름을 추가하고, PC 커넥터(`src/app/host`)에 이를 수집하거나 실행하는 코드를 넣는다. 절차는 [04-host-link.md](04-host-link.md) 4.12절에 있다. **호스트는 덱에 허용한 액션만 실행하므로, 새 액션에는 권한도 함께 정의한다.** 미디어 제어 위젯(`MediaWidget`)이 레퍼런스다.
@@ -1103,6 +1132,7 @@ CompositeWidget {
 | 페어링 삭제 | 덱: 설정 → `Paired devices` → 대상 기기 → `FORGET`(확인 다이얼로그). PC: `toss-connector forget <키 접두사>` |
 | 명령 버튼 사용 | PC: 웹 콘솔의 "명령 → + 추가", 또는 `toss-connector command add <이름> -- <명령…>`으로 등록하고, 해당 덱에 `command.run` 권한을 허용한다(웹 콘솔의 토글이나 `toss-connector allow command.run`). 덱: 편집 모드에서 랙 빈 슬롯의 `+` → `Command` → `Run` |
 | PC에서 권한과 명령을 웹 콘솔로 관리 | PC: `toss-connector`를 실행해 둔 상태에서 `toss-connector console` → 브라우저에 웹 콘솔이 열린다([04-host-link.md](04-host-link.md) 4.10절) |
+| 음량 믹서 추가 | PC: 해당 덱에 `audio.control` 권한을 허용한다(웹 콘솔의 토글이나 `toss-connector allow audio.control`. 보기만 하려면 필요 없다). `toss-connector audio`로 PC가 오디오 서버에 붙는지 먼저 확인할 수 있다. 덱: 편집 모드의 `+` → `Volume mixer` → 크기 선택 → PC 선택 → `ADD` |
 | 리소스 미터 추가 | 덱: 편집 모드의 `+` → `Resource monitor` → 크기 선택 → 대상(`This deck` 또는 PC)과 메트릭 선택(선택한 순서대로 배치) → 헤더의 `ADD`. PC를 대상으로 하려면 해당 PC에서 `resource.info` 권한이 허용돼 있어야 한다(기본값은 켜짐) |
 | 스위치와 노브 사용 | PC: 웹 콘솔의 "명령 → + 추가", 또는 `toss-connector command add-switch`·`add-stepped`·`add-linear`로 등록(사용법과 예시는 [04-host-link.md](04-host-link.md) 4.6절 "명령"), `toss-connector command set`·`state`로 PC에서 먼저 테스트한다. 덱: 랙 빈 슬롯의 `+` → `Command` → `Switch`, `Stepped knob`, `Linear knob`. 스위치는 탭하고, 단계 노브는 탭하거나(다음 단계) 드래그하고, 연속 노브는 드래그한다(오른쪽·위쪽이 증가 방향) |
 | 덱 SSH 켜고 끄기 | 덱: 설정 → `NETWORK` → `SSH`. 꺼 두면 재플래싱하거나 재부팅해도 꺼진 상태가 유지된다. 개발이나 플래싱 시에는 먼저 켠다 |

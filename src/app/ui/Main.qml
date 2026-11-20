@@ -181,6 +181,11 @@ Window {
             link: daemon
         }
 
+        AudioSheet {
+            anchors.fill: parent
+            link: daemon
+        }
+
         VaultAsk {
             anchors.fill: parent
             link: daemon

@@ -20,5 +20,7 @@ Item {
     property var metrics: []
     property var metricValues: ({})
     property var meterSource: ({ own: true, name: "", live: false })
+    property var audio: null
+    property var levels: ({})
     signal action(string name, var args)
 }

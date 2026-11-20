@@ -35,6 +35,11 @@
 //   meters        측정 가능한 리소스 목록  {"@deck":[{"id":"cpu","name":"CPU","title":"CPU usage","unit":"%","max":100,"decimals":0},..],"<호스트 id>":[..]}
 //                 `"@deck"`은 덱 자신, 나머지는 메트릭을 제공하는 호스트(PC)다. 자원 미터 위젯 추가 시 이 목록에서 선택한다.
 //   meterValues   리소스 현재 값  {"@deck":{"cpu":12,..},"<호스트 id>":{..}}  — 자원 미터 위젯이 표시 중인 항목만 전달된다.
+//   audio         호스트의 음량 믹서 상태  {"<호스트 id>":{"outputs":[{"id":..,"title":..,"volume":..(1이 100%),"muted":..,"default":..}],
+//                   "apps":[{"id":..,"name":..,"volume":..,"muted":..,"output":..(출력 장치 id, 여러 장치면 빈 문자열),"streams":..}]}}
+//   audioLevels   음량 레벨(0~1)  {"<호스트 id>":{"apps":{"<앱 id>":..},"outputs":{"<장치 id>":..}}}  — 배치에 음량 믹서가 있는 호스트만 전달된다.
+//   audioPick     화면에 띄운 출력 장치 선택 창(없으면 `null`)  {"host":..,"widget":..,"app":"<앱 id. 비어 있으면 기본 출력 장치를 고른다>","title":..,"output":..}
+//                 음량 믹서가 `audio.pick` 액션을 보내면 열린다(데몬에는 보내지 않는다). 닫을 때는 `null`로 되돌린다(`shell/AudioSheet`)
 //   results       위젯 액션의 최근 결과  {"<위젯 id>":{"seq":..,"ok":..,"error":..,"at":..(수신 시각 `Date.now()`)}}
 //   vault         덱 금고 상태  {"services":[{"id":"discord","title":"Discord","registered":..,"linked":..,"hosts":[허용한 호스트 id..]}],
 //                               "asking":{"host":..,"name":..,"service":..,"title":..} 또는 null(허용 여부를 묻는 중인 요청)}  (키 값은 오지 않는다)
@@ -89,6 +94,9 @@ Item {
     property var values: ({})
     property var meters: ({})
     property var meterValues: ({})
+    property var audio: ({})
+    property var audioLevels: ({})
+    property var audioPick: null
     property var pairing: ({ active: false, candidate: null })
     property var vault: ({ services: [], asking: null })
     property var icons: ({})
@@ -131,6 +139,10 @@ Item {
     function layoutTidy() { send({ type: "layout_tidy" }) }
     function layoutReset() { send({ type: "layout_reset" }) }
     function action(name, args, hostId, widget) {
+        if (name === "audio.pick") {
+            audioPick = { host: hostId, widget: widget, app: args.app, title: args.title, output: args.output }
+            return
+        }
         if (hostId === "@spotify" && (name === "spotify.queue" || name === "spotify.devices")) {
             spotifyThemed = !!(args && args.themed)
             spotifyView = name === "spotify.queue" ? "queue" : "devices"
@@ -170,6 +182,8 @@ Item {
             case "values": link.values = m.hosts; break
             case "meters": link.meters = m.hosts; break
             case "meter_values": link.meterValues = m.hosts; break
+            case "audio": link.audio = m.hosts; break
+            case "audio_levels": link.audioLevels = m.hosts; break
             case "vault": link.vault = { services: m.services, asking: m.asking }; break
             case "icons": link.icons = m.icons; break
             case "spotify":

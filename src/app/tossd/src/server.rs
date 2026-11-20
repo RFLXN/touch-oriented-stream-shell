@@ -34,6 +34,8 @@ struct Seen {
     values: u64,
     meter_infos: u64,
     meter_values: u64,
+    audio: u64,
+    audio_levels: u64,
     results: u64,
     result_seq: u64,
     vault: u64,
@@ -44,7 +46,7 @@ struct Seen {
 impl Seen {
     fn new(shared: &Shared) -> Self {
         let never = u64::MAX;
-        Self { sys: never, wifi: never, layout: never, device: never, hosts: never, values: never, meter_infos: never, meter_values: never, results: never, result_seq: shared.results.lock().seq(), vault: never, icons: never, spotify: never }
+        Self { sys: never, wifi: never, layout: never, device: never, hosts: never, values: never, meter_infos: never, meter_values: never, audio: never, audio_levels: never, results: never, result_seq: shared.results.lock().seq(), vault: never, icons: never, spotify: never }
     }
 }
 
@@ -77,6 +79,12 @@ fn push(ws: &mut WebSocket<TcpStream>, shared: &Shared, seen: &mut Seen) -> Resu
     }
     if let Some(values) = shared.meter_values.fresh(&mut seen.meter_values) {
         send(ws, &ServerMsg::MeterValues { hosts: &values })?;
+    }
+    if let Some(audio) = shared.audio.fresh(&mut seen.audio) {
+        send(ws, &ServerMsg::Audio { hosts: &audio })?;
+    }
+    if let Some(levels) = shared.audio_levels.fresh(&mut seen.audio_levels) {
+        send(ws, &ServerMsg::AudioLevels { hosts: &levels })?;
     }
     if let Some(vault) = shared.vault.fresh(&mut seen.vault) {
         send(ws, &ServerMsg::Vault(&vault))?;

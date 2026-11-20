@@ -10,7 +10,8 @@
 //   chevron back lock      목록 탐색(`>`), 뒤로가기(`<`), 잠금
 //   close plus grip        배치 편집: 삭제(`x`), 추가(`+`), 크기 조절 핸들(빗금 2개)
 //   shift backspace enter hide globe   가상 키보드 기능 키
-//   heart hearton queue device         Spotify: 좋아요(빈 하트 / 채운 하트), 대기열, 재생 기기
+//   heart hearton queue device         Spotify: 좋아요(빈 하트 / 채운 하트), 대기열, 재생 기기(음량 믹서의 출력 장치 선택에도 쓴다)
+//   speaker mute                       음량 믹서: 소리 켜짐(스피커와 음파), 음소거(스피커와 x)
 import QtQuick
 import QtQuick.Shapes
 
@@ -36,7 +37,9 @@ Shape {
         core: "M10.6 10.6 H13.4 V13.4 H10.6 Z",
         lock: "M6.5 11.5 H17.5 V20 H6.5 Z",
         hearton: "M12 20 L4.3 12.4 A4.4 4.4 0 0 1 12 6.9 A4.4 4.4 0 0 1 19.7 12.4 Z",
-        queue: "M15 14 L20.5 17.25 L15 20.5 Z"
+        queue: "M15 14 L20.5 17.25 L15 20.5 Z",
+        speaker: "M3 9 H7 L12 4.5 V19.5 L7 15 H3 Z",
+        mute: "M3 9 H7 L12 4.5 V19.5 L7 15 H3 Z"
     })
     readonly property var lines: ({
         usb: "M12 18.5 V5 M12 17 L5.6 13.6 V12 M12 14 L18.5 10.6 V9.4",
@@ -60,7 +63,9 @@ Shape {
         globe: "M3.5 12 A8.5 8.5 0 1 0 20.5 12 A8.5 8.5 0 1 0 3.5 12 Z M3.5 12 H20.5 M12 3.5 C7.5 7.5 7.5 16.5 12 20.5 M12 3.5 C16.5 7.5 16.5 16.5 12 20.5",
         heart: "M12 20 L4.3 12.4 A4.4 4.4 0 0 1 12 6.9 A4.4 4.4 0 0 1 19.7 12.4 Z",
         queue: "M3.5 6 H19.5 M3.5 11 H19.5 M3.5 16 H11",
-        device: "M3.5 5 H20.5 V15.5 H3.5 Z M8.5 19.5 H15.5 M12 15.5 V19.5"
+        device: "M3.5 5 H20.5 V15.5 H3.5 Z M8.5 19.5 H15.5 M12 15.5 V19.5",
+        speaker: "M15 9 A4.2 4.2 0 0 1 15 15 M17.6 6.2 A8 8 0 0 1 17.6 17.8",
+        mute: "M15.5 9 L21 14.5 M21 9 L15.5 14.5"
     })
 
     width: size

@@ -26,6 +26,14 @@
 //!                                                            (변경 시 전체 전송. 형식은 `toss-proto`의 `MetricInfo`).
 //!   {"type":"meter_values","hosts":{"@deck":{"cpu":12,"mem":301989888},"<호스트 id>":{..}}}
 //!                                                            리소스 현재 값. **자원 미터 위젯이 현재 표시 중인 항목만** 포함된다(약 1초 간격, 변경 시 전송).
+//!   {"type":"audio","hosts":{"<호스트 id>":{"outputs":[{"id":"alsa_output..","title":"DX5 II","volume":1,"muted":false,"default":true}],
+//!    "apps":[{"id":"firefox","name":"Firefox","volume":0.5,"muted":false,"output":"alsa_output..","streams":2}]}}}
+//!                                                            호스트의 음량 믹서 상태(`toss-proto`의 `Audio`. 음량은 1이 100%, 앱의 `output`이
+//!                                                            빈 문자열이면 스트림들이 서로 다른 장치로 나간다). 상태를 보낸 온라인 호스트만 포함되며 변경 시 전체 전송.
+//!                                                            제어는 `action`으로 보낸다(`audio.volume` / `audio.mute` / `audio.route` / `audio.default`, 인자는 `toss-proto` 참고)
+//!   {"type":"audio_levels","hosts":{"<호스트 id>":{"apps":{"firefox":0.42},"outputs":{"alsa_output..":0.4}}}}
+//!                                                            음량 믹서의 레벨 미터 값(0~1). **배치에 그 호스트를 가리키는 음량 믹서가 있을 때만** 포함된다.
+//!                                                            호스트가 약 0.1초마다 보내고, UI 서버의 전송 주기(0.1초)마다 바뀐 경우 전체 전송
 //!   {"type":"vault","services":[{"id":"discord","title":"Discord","registered":true,"linked":true,"hosts":["<호스트 id>"]}],
 //!    "asking":{"host":"<호스트 id>","name":"pc","service":"discord","title":"Discord"}}
 //!                                                            덱 금고 상태(키 값은 포함하지 않음. `hosts/vault.rs`의 `VaultState`). `registered`는 서비스 키 보관 여부,
@@ -84,7 +92,7 @@
 //!
 //! 배치 규칙
 //!   - 버튼 위젯(`command.*`: 버튼, 스위치, 노브)은 반드시 랙 내부에 놓인다.
-//!   - 복합 위젯(`media.player`, `monitor.*`)은 랙과 동등한 수준으로 페이지에 직접 배치되며, 내부에 다른 위젯을 담을 수 없다.
+//!   - 복합 위젯(`media.player`, `mixer.*`, `monitor.*`)은 랙과 동등한 수준으로 페이지에 직접 배치되며, 내부에 다른 위젯을 담을 수 없다.
 //!
 //! 배치 형식: 페이지마다 랙과 복합 위젯 배열을 둔다.
 //!   {"name":"Main",
@@ -94,7 +102,8 @@
 //!   kind      위젯 종류: `command.run`(단발 실행 버튼: 호스트에 등록된 명령 실행, settings의 `host`와 `command`)
 //!             / `command.switch`(스위치) / `command.stepped`(단계 노브) / `command.linear`(연속 노브): 호스트에 등록된
 //!               상태형 명령을 표시하고 제어(settings는 `command.run`과 동일) — 이상은 랙 내부에 배치
-//!             / `media.player`(미디어 제어) / `monitor.2x1` · `2x2` · `4x1` · `4x2`(자원 미터: settings의 `host`는 대상 기기 — `"@deck"`이면 덱 자신,
+//!             / `media.player`(미디어 제어) / `mixer.2x2` · `3x2` · `4x2` · `2x3` · `3x3` · `4x3`(음량 믹서: settings의 `host`는 대상 PC, `output_strip`은 기본 출력 장치 페이더 표시 여부)
+//!             / `monitor.2x1` · `2x2` · `4x1` · `4x2`(자원 미터: settings의 `host`는 대상 기기 — `"@deck"`이면 덱 자신,
 //!               아니면 호스트 ID — `metrics`는 표시할 리소스 ID 배열) — 이상은 복합 위젯
 //!   settings  위젯 개별 설정. `media.player`는 `host`(대상 호스트 ID. 없거나 비어 있으면 연결된 아무 호스트)
 //!   x, y      좌상단 타일 좌표(0부터 시작), `w`, `h`는 점유 타일 크기.
@@ -107,7 +116,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::device::DeviceState;
-use crate::hosts::{HostsState, Values, VaultState};
+use crate::hosts::{AudioLevels, Audios, HostsState, Values, VaultState};
 use crate::icons::IconMap;
 use crate::spotify::SpotifyState;
 use crate::layout::{AppInfo, Edit, Layout, Target};
@@ -129,6 +138,8 @@ pub enum ServerMsg<'a> {
     Values { hosts: &'a Values },
     Meters { hosts: &'a MeterInfos },
     MeterValues { hosts: &'a MeterValues },
+    Audio { hosts: &'a Audios },
+    AudioLevels { hosts: &'a AudioLevels },
     Vault(&'a VaultState),
     Icons { icons: &'a IconMap },
     Spotify(&'a SpotifyState),

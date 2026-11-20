@@ -132,6 +132,7 @@
             lz4
             xxd
             rust
+            libpulseaudio
           ];
         };
 

@@ -1,10 +1,11 @@
 //! 호스트 연결 세션: 핸드셰이크 후 `hello`를 검증해 수락 여부를 결정하고, 페어링된 호스트라면 연결 종료 시까지 상태를 수신한다.
 //!
 //! 미등록 키에는 거절 `hello`와 사유만 전송한다(덱 주소와 WoWLAN MAC 주소는 비워서 보낸다).
-//! 호스트가 전달하는 문자열(이름, 권한, 명령 및 메트릭 목록)은 길이와 제어 문자를 정제·검증해 수신한다 — UI와 로그에 그대로 노출되기 때문이다.
+//! 호스트가 전달하는 문자열(이름, 권한, 명령 및 메트릭 목록, 음량 믹서의 장치와 앱)은 길이와 제어 문자를 정제·검증해 수신한다 — UI와 로그에 그대로 노출되기 때문이다.
 //! 금고 요청(`vault`)은 화면에서 허용 여부를 묻거나 토큰 주소에 요청하는 동안 오래 걸릴 수 있으므로 요청마다 별도 스레드에서 처리한다
 //! (그동안에도 다른 메시지는 계속 받는다). 연결이 끊기면 이 호스트가 화면에 띄운 질문을 거두어들인다.
 
+use std::collections::BTreeMap;
 use std::io;
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -13,7 +14,7 @@ use std::thread;
 use std::time::Instant;
 
 use toss_proto::secure::Conn;
-use toss_proto::{CommandInfo, DeckMsg, HostMsg, MetricInfo, DEAD_AFTER, DENIED_BUSY, DENIED_NOT_PAIRED, PING_EVERY, PROTO_VERSION, STATUS_DENIED, STATUS_PAIRED, STATUS_PAIRING, VAULT_ERR_BUSY};
+use toss_proto::{Audio, AudioApp, AudioOutput, CommandInfo, DeckMsg, HostMsg, MetricInfo, DEAD_AFTER, DENIED_BUSY, DENIED_NOT_PAIRED, PING_EVERY, PROTO_VERSION, STATUS_DENIED, STATUS_PAIRED, STATUS_PAIRING, VAULT_ERR_BUSY};
 
 use super::blob::take_piece;
 use super::pairing::Pending;
@@ -29,6 +30,11 @@ const ERROR_MAX: usize = 200;
 /// 호스트당 명령·스위치/노브 값·메트릭 최대 개수
 const COMMANDS_MAX: usize = 256;
 const METRICS_MAX: usize = 512;
+/// 음량 믹서의 출력 장치·앱 최대 개수, ID 최대 길이(바이트), 표시 이름 최대 길이(문자 수)
+const AUDIO_OUTPUTS_MAX: usize = 32;
+const AUDIO_APPS_MAX: usize = 64;
+const AUDIO_ID_MAX: usize = 256;
+const AUDIO_NAME_MAX: usize = 80;
 /// 호스트당 동시에 처리하는 금고 요청 최대 개수(넘으면 busy로 거절)
 const VAULT_INFLIGHT_MAX: usize = 4;
 
@@ -50,13 +56,50 @@ struct Changed {
     hosts: bool,
     values: bool,
     meters: bool,
+    audio: bool,
+    levels: bool,
 }
 
 impl Changed {
-    const NONE: Self = Self { hosts: false, values: false, meters: false };
+    const NONE: Self = Self { hosts: false, values: false, meters: false, audio: false, levels: false };
     const HOSTS: Self = Self { hosts: true, ..Self::NONE };
     const VALUES: Self = Self { values: true, ..Self::NONE };
     const METERS: Self = Self { meters: true, ..Self::NONE };
+    const AUDIO: Self = Self { audio: true, levels: true, ..Self::NONE };
+    const LEVELS: Self = Self { levels: true, ..Self::NONE };
+}
+
+/// 호스트가 보낸 음량 믹서 상태 정제: 개수와 문자열 길이를 제한하고, 음량은 0~4로 자른다(표시 범위는 UI가 정한다).
+fn clean_audio(a: Audio) -> Audio {
+    let vol = |v: f64| if v.is_finite() { v.clamp(0.0, 4.0) } else { 0.0 };
+    let id_ok = |id: &str| !id.is_empty() && id.len() <= AUDIO_ID_MAX;
+    Audio {
+        outputs: a
+            .outputs
+            .into_iter()
+            .filter(|o| id_ok(&o.id))
+            .take(AUDIO_OUTPUTS_MAX)
+            .map(|o| AudioOutput { title: clean(&o.title, AUDIO_NAME_MAX), volume: vol(o.volume), ..o })
+            .collect(),
+        apps: a
+            .apps
+            .into_iter()
+            .filter(|p| id_ok(&p.id) && (p.output.is_empty() || p.output.len() <= AUDIO_ID_MAX))
+            .take(AUDIO_APPS_MAX)
+            .map(|p| AudioApp { name: clean(&p.name, AUDIO_NAME_MAX), volume: vol(p.volume), ..p })
+            .collect(),
+    }
+}
+
+/// 받은 레벨 중 현재 상태에 있는 앱·출력 장치의 값만 0~1로 잘라 반영한다. 값이 바뀌었으면 `true`.
+fn take_levels(cur: &mut BTreeMap<String, f64>, got: BTreeMap<String, f64>, known: impl Fn(&str) -> bool) -> bool {
+    let mut changed = false;
+    for (id, v) in got {
+        if v.is_finite() && known(&id) {
+            changed |= cur.insert(id, v.clamp(0.0, 1.0)) != Some(v.clamp(0.0, 1.0));
+        }
+    }
+    changed
 }
 
 /// 호스트가 보낸 문자열 정제: 제어 문자를 제거하고 최대 `max` 글자로 자른다.
@@ -178,6 +221,12 @@ impl Hosts {
         if changed.meters {
             self.publish_meters(&inner);
         }
+        if changed.audio {
+            self.publish_audio(&inner);
+        }
+        if changed.levels {
+            self.publish_levels(&inner);
+        }
     }
 
     /// 페어링된 호스트의 일반 세션 루프. 연결이 끊길 때까지 반환하지 않는다.
@@ -196,7 +245,9 @@ impl Hosts {
             e.conn = Some(conn.clone());
             self.publish_values(&inner);
             self.publish_meters(&inner);
-            let _ = conn.send(&DeckMsg::Watch { metrics: watch });
+            self.publish_audio(&inner);
+            self.publish_levels(&inner);
+            let _ = conn.send(&DeckMsg::Watch { metrics: watch.metrics, audio: watch.audio });
             self.publish(&inner);
             (old, renamed)
         };
@@ -241,7 +292,7 @@ impl Hosts {
                     if listed {
                         e.info.commands = commands;
                     }
-                    Changed { hosts: listed, values: e.values.len() != before, meters: false }
+                    Changed { hosts: listed, values: e.values.len() != before, ..Changed::NONE }
                 }),
                 HostMsg::Metrics { metrics } => self.update(peer.session, |e| {
                     let metrics: Vec<MetricInfo> = metrics.into_iter().filter(sane_metric).take(METRICS_MAX).collect();
@@ -256,6 +307,30 @@ impl Hosts {
                         }
                     }
                     Changed::METERS
+                }),
+                HostMsg::Audio { audio } => self.update(peer.session, |e| {
+                    let audio = audio.map(clean_audio);
+                    if e.audio == audio {
+                        return Changed::NONE;
+                    }
+                    if let Some(a) = &audio {
+                        e.levels.apps.retain(|id, _| a.apps.iter().any(|p| p.id == *id));
+                        e.levels.outputs.retain(|id, _| a.outputs.iter().any(|o| o.id == *id));
+                    } else {
+                        e.levels = Default::default();
+                    }
+                    e.audio = audio;
+                    Changed::AUDIO
+                }),
+                HostMsg::AudioLevels { apps, outputs } => self.update(peer.session, |e| {
+                    let Some(a) = &e.audio else { return Changed::NONE };
+                    let apps = take_levels(&mut e.levels.apps, apps, |id| a.apps.iter().any(|p| p.id == id));
+                    let outputs = take_levels(&mut e.levels.outputs, outputs, |id| a.outputs.iter().any(|o| o.id == id));
+                    if apps || outputs {
+                        Changed::LEVELS
+                    } else {
+                        Changed::NONE
+                    }
                 }),
                 HostMsg::CommandValue { id, value } => self.update(peer.session, |e| {
                     let changed = match value.filter(|v| v.is_finite()) {
@@ -322,6 +397,8 @@ impl Hosts {
             self.publish(&inner);
             self.publish_values(&inner);
             self.publish_meters(&inner);
+            self.publish_audio(&inner);
+            self.publish_levels(&inner);
             eprintln!("host: 연결 종료: {}: {ended}", peer.name);
         }
         Ok(())

@@ -54,6 +54,21 @@ pub enum Kind {
     /// 같으면) Spotify 플레이어로 바뀐다. 판별과 전환은 UI가 한다(`shell/WidgetSlot`). 이 위젯이 있으면 덱이 Spotify를 조회한다.
     #[serde(rename = "media.combo")]
     MediaCombo,
+    /// 음량 믹서: PC의 앱(과 설정에 따라 기본 출력 장치)마다 세로 페이더, 레벨 미터, 음소거, 출력 장치 선택을 둔다.
+    /// 너비 2·3·4칸과 높이 2·3칸을 조합한 6가지 크기가 있고 모양은 같다(너비에 들어가는 만큼 스트립을 보이고 나머지는 옆으로 넘긴다).
+    /// 이 위젯이 있으면 대상 PC에 레벨을 구독한다(`audio_hosts`).
+    #[serde(rename = "mixer.2x2")]
+    Mixer2x2,
+    #[serde(rename = "mixer.3x2")]
+    Mixer3x2,
+    #[serde(rename = "mixer.4x2")]
+    Mixer4x2,
+    #[serde(rename = "mixer.2x3")]
+    Mixer2x3,
+    #[serde(rename = "mixer.3x3")]
+    Mixer3x3,
+    #[serde(rename = "mixer.4x3")]
+    Mixer4x3,
     /// 자원 미터: 선택한 호스트(페어링된 PC 또는 덱 자신)의 시스템 자원을 표시한다. 4가지 크기가 있으며 최대 미터 수가 다르다
     /// (2x1은 3개, 2x2와 4x1은 6개, 4x2는 12개).
     #[serde(rename = "monitor.2x1")]
@@ -92,7 +107,12 @@ impl Kind {
 
     /// 복합 위젯 여부(true면 랙과 동등하게 페이지에 직접 배치, false면 랙 내부 칸에만 배치 가능한 버튼 위젯).
     pub fn is_composite(self) -> bool {
-        matches!(self, Kind::MediaPlayer | Kind::MediaCombo) || self.meters() > 0
+        matches!(self, Kind::MediaPlayer | Kind::MediaCombo) || self.is_mixer() || self.meters() > 0
+    }
+
+    /// 음량 믹서(크기 6가지 중 하나)인지 여부
+    pub fn is_mixer(self) -> bool {
+        matches!(self, Kind::Mixer2x2 | Kind::Mixer3x2 | Kind::Mixer4x2 | Kind::Mixer2x3 | Kind::Mixer3x3 | Kind::Mixer4x3)
     }
 
     /// 자원 미터 위젯이면 최대 미터 수를, 아니면 0을 반환한다.
@@ -177,6 +197,19 @@ impl Layout {
             for id in w.settings.get("metrics").map(|m| metric_ids(m, w.kind.meters())).unwrap_or_default() {
                 if !list.contains(&id) {
                     list.push(id);
+                }
+            }
+        }
+        out
+    }
+
+    /// 음량 믹서 위젯이 가리키는 호스트(중복 제거). 이 호스트들에만 음량 레벨을 구독한다.
+    pub fn audio_hosts(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for w in self.pages.iter().flat_map(|p| &p.widgets).filter(|w| w.kind.is_mixer()) {
+            if let Some(host) = w.settings.get("host").and_then(Value::as_str).filter(|h| !h.is_empty()) {
+                if !out.iter().any(|h| h == host) {
+                    out.push(host.to_string());
                 }
             }
         }

@@ -279,7 +279,8 @@ in
               ];
               description = ''
                 허용할 권한 목록(페어링된 모든 덱에 일괄 적용).
-                `media.info`(재생 정보 조회), `media.control`(재생 제어), `resource.info`(리소스 조회),
+                `media.info`(재생 정보 조회), `media.control`(재생 제어), `audio.info`(앱별 음량·출력 장치 조회),
+                `audio.control`(음량·음소거·출력 장치 변경), `resource.info`(리소스 조회),
                 `command.run`(등록된 명령 실행), `web.open`(덱의 웹페이지 버튼으로 브라우저에서 주소 열기).
                 알 수 없는 권한 이름이 포함되면 빌드가 실패한다.
               '';

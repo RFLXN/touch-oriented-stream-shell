@@ -128,7 +128,7 @@ impl Host {
 
     fn next_watch(&mut self) -> Vec<String> {
         self.next_that(|m| match m {
-            DeckMsg::Watch { metrics } => Some(metrics),
+            DeckMsg::Watch { metrics, .. } => Some(metrics),
             _ => None,
         })
     }
@@ -250,6 +250,25 @@ fn hosts_pair_then_exchange_state_and_actions() {
     assert_eq!(v["hosts"][me.id()]["ghost"], Value::Null);
     host.send(HostMsg::Metrics { metrics: Vec::new() });
     next_when(&mut ui, "meters", |v| v["hosts"][me.id()].is_null());
+
+    let output = |id: &str| toss_proto::AudioOutput { id: id.into(), title: id.to_uppercase(), volume: 0.5, muted: false, default: id == "dac" };
+    let app = toss_proto::AudioApp { id: "firefox".into(), name: "Fire\u{7}fox".into(), volume: 9.0, muted: false, output: "dac".into(), streams: 2 };
+    host.send(HostMsg::Audio { audio: Some(toss_proto::Audio { outputs: vec![output("dac"), output("")], apps: vec![app] }) });
+    let v = next_when(&mut ui, "audio", |v| v["hosts"][me.id()].is_object());
+    let a = &v["hosts"][me.id()];
+    assert_eq!((a["outputs"].as_array().unwrap().len(), &a["apps"][0]["name"], &a["apps"][0]["volume"]), (1, &Value::from("Firefox"), &Value::from(4.0)));
+    host.send(HostMsg::AudioLevels { apps: [("firefox".to_string(), 0.5)].into(), outputs: Default::default() });
+    say(&mut ui, json!({ "type": "layout_add", "what": "mixer.4x2", "page": 0, "settings": { "host": me.id() } }));
+    assert!(host.next_that(|m| match m {
+        DeckMsg::Watch { audio, .. } => Some(audio),
+        _ => None,
+    }));
+    host.send(HostMsg::AudioLevels { apps: [("firefox".to_string(), 0.75), ("ghost".to_string(), 1.0)].into(), outputs: [("dac".to_string(), 2.0)].into() });
+    let v = next_when(&mut ui, "audio_levels", |v| v["hosts"][me.id()]["apps"]["firefox"] == 0.75);
+    assert_eq!((&v["hosts"][me.id()]["apps"]["ghost"], &v["hosts"][me.id()]["outputs"]["dac"]), (&Value::Null, &Value::from(1.0)));
+    host.send(HostMsg::Audio { audio: None });
+    next_when(&mut ui, "audio", |v| v["hosts"][me.id()].is_null());
+    next_when(&mut ui, "audio_levels", |v| v["hosts"][me.id()].is_null());
 
     say(&mut ui, json!({ "type": "action", "name": "command.run", "args": { "id": "c0ffee00" }, "widget": 41 }));
     let DeckMsg::Action { id, name, args } = host.next() else { panic!("Action 메시지가 아님") };

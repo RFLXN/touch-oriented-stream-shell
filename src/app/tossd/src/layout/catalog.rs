@@ -85,6 +85,15 @@ fn monitor_kind(kind: Kind, title: &'static str, about: &'static str, size: (u32
     KindInfo::new(kind, title, about, size, "MONITOR", settings)
 }
 
+/// 음량 믹서 위젯 종류 생성 헬퍼(`mixer` 앱). 6가지 크기는 설정 구조가 같다.
+fn mixer_kind(kind: Kind, title: &'static str, about: &'static str, size: (u32, u32)) -> KindInfo {
+    let settings = vec![
+        SettingInfo::new("host", "PC", "The PC whose sound this mixer controls", "host", true),
+        SettingInfo { initial: true, ..SettingInfo::new("output_strip", "Output strip", "A fader for the default output device in front of the apps", "flag", false) },
+    ];
+    KindInfo::new(kind, title, about, size, "MIXER", settings)
+}
+
 /// 명령 위젯 종류 생성 헬퍼(`command` 앱). 4가지 모두 랙 1칸 크기이며 설정 구조는 같고(`host`, `command`, `label`, `color`)
 /// 필터링할 명령 종류(`filter`)만 다르다. 인디케이터가 있는 스위치만 인디케이터 색상(`light`)을 더 고른다.
 fn command_kind(kind: Kind, title: &'static str, about: &'static str, filter: &'static str, pick: &'static str) -> KindInfo {
@@ -139,6 +148,19 @@ pub fn catalog() -> Vec<AppInfo> {
                     SettingInfo { initial: true, ..SettingInfo::new("spotify_theme", "Spotify theme", "Draw it like the Spotify app while the PC plays Spotify", "flag", false) },
                 ],
             )],
+        },
+        AppInfo {
+            id: "mixer",
+            title: "Volume mixer",
+            about: "Volume, level meters and output devices of the apps playing on a PC",
+            widgets: vec![
+                mixer_kind(Kind::Mixer2x2, "Mixer 2×2", "3 faders at a time. Swipe sideways for more", (2, 2)),
+                mixer_kind(Kind::Mixer3x2, "Mixer 3×2", "5 faders at a time. Swipe sideways for more", (3, 2)),
+                mixer_kind(Kind::Mixer4x2, "Mixer 4×2", "7 faders at a time. Swipe sideways for more", (4, 2)),
+                mixer_kind(Kind::Mixer2x3, "Mixer 2×3", "3 long faders at a time. Swipe sideways for more", (2, 3)),
+                mixer_kind(Kind::Mixer3x3, "Mixer 3×3", "5 long faders at a time. Swipe sideways for more", (3, 3)),
+                mixer_kind(Kind::Mixer4x3, "Mixer 4×3", "7 long faders at a time. Swipe sideways for more", (4, 3)),
+            ],
         },
         AppInfo {
             id: "monitor",

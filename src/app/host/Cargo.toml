@@ -16,6 +16,7 @@ ureq = { version = "2", default-features = false, features = ["tls"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
+libpulse-binding = { version = "2.30", default-features = false }
 
 [profile.release]
 opt-level = 3

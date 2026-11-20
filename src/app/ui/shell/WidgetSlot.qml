@@ -9,6 +9,7 @@
 //   result        이 위젯이 보낸 최근 액션 결과(없으면 `null`)
 //   metrics, metricValues, meterSource   자원 미터 대상 호스트의 메트릭 목록, 현재 값, 소스 이름 및 실시간 수신 여부
 //   icons         사이트 아이콘(주소 -> `data:` URI). 웹페이지 아이콘 버튼(`web.icon`)에만 넣는다
+//   audio, levels 대상 PC의 음량 믹서 상태(`{outputs, apps}`, 없으면 `null`)와 레벨(`{apps, outputs}`). 음량 믹서(`mixer.*`)에만 넣는다
 // 위젯이 요청한 액션(`action`)은 대상 호스트 ID 및 위젯 ID와 함께 데몬으로 전송된다(`link.action`).
 // 미디어 위젯의 대상이 Spotify이고 `spotify_theme`이 켜져 있으면 `MediaWidget` 대신 `widgets/SpotifyPlayer`를 로드한다.
 // PC+Spotify 위젯(`media.combo`)은 평소에는 고른 PC의 `MediaWidget`이고, 그 PC가 Spotify를 재생 중이면 `SpotifyPlayer`로 바뀐다
@@ -36,6 +37,9 @@ Loader {
     readonly property var meters: link ? link.meters : ({})
     readonly property var meterValues: link ? link.meterValues : ({})
     readonly property var icons: link ? link.icons : ({})
+    readonly property bool isMixer: (widget.kind || "").startsWith("mixer.")
+    readonly property var audioOf: link ? link.audio : ({})
+    readonly property var levelsOf: link ? link.audioLevels : ({})
 
     readonly property var sources: ({
         "command.run": "../widgets/CommandWidget.qml",
@@ -44,6 +48,12 @@ Loader {
         "command.linear": "../widgets/CommandLinearWidget.qml",
         "media.player": "../widgets/MediaWidget.qml",
         "media.combo": "../widgets/MediaWidget.qml",
+        "mixer.2x2": "../widgets/MixerWidget.qml",
+        "mixer.3x2": "../widgets/MixerWidget.qml",
+        "mixer.4x2": "../widgets/MixerWidget.qml",
+        "mixer.2x3": "../widgets/MixerWidget.qml",
+        "mixer.3x3": "../widgets/MixerWidget.qml",
+        "mixer.4x3": "../widgets/MixerWidget.qml",
         "monitor.2x1": "../widgets/MeterWidget.qml",
         "monitor.2x2": "../widgets/MeterWidget.qml",
         "monitor.4x1": "../widgets/MeterWidget.qml",
@@ -122,6 +132,8 @@ Loader {
     Binding { target: slot.item; property: "meterSource"; value: slot.meterSource; when: slot.status === Loader.Ready }
     Binding { target: slot.item; property: "result"; value: slot.results[slot.widget.id] || null; when: slot.status === Loader.Ready }
     Binding { target: slot.item; property: "icons"; value: slot.icons; when: slot.status === Loader.Ready && slot.widget.kind === "web.icon" }
+    Binding { target: slot.item; property: "audio"; value: slot.shownHost ? slot.audioOf[slot.shownHost.id] || null : null; when: slot.status === Loader.Ready && slot.isMixer }
+    Binding { target: slot.item; property: "levels"; value: slot.shownHost ? slot.levelsOf[slot.shownHost.id] || slot.noValues : slot.noValues; when: slot.status === Loader.Ready && slot.isMixer }
     Connections {
         target: slot.item
         function onAction(name, args) {

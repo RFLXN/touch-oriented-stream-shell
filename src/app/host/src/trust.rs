@@ -9,11 +9,11 @@
 //!   - 실행 중인 toss-connector는 decks.json 변경을 감지해 재시작 없이 곧 반영한다.
 //!
 //! 새 권한 추가 방법: toss-proto에 CAP_* 상수와 action_cap 매핑을 추가하고 아래 PERMISSIONS 테이블에 등록한다(docs/04-host-link.md 4.12절).
-//! 호스트 시스템에 영향을 주는 권한(키 입력, 명령 실행 등)은 반드시 기본값을 false로 둔다.
+//! 호스트 시스템에 영향을 주는 권한(키 입력, 명령 실행, 음량·출력 장치 변경 등)은 반드시 기본값을 false로 둔다.
 
 use std::collections::BTreeMap;
 
-use toss_proto::{action_cap, CAP_COMMAND_RUN, CAP_MEDIA_CONTROL, CAP_MEDIA_INFO, CAP_RESOURCE_INFO, CAP_WEB_OPEN, ERROR_NOT_ALLOWED};
+use toss_proto::{action_cap, CAP_AUDIO_CONTROL, CAP_AUDIO_INFO, CAP_COMMAND_RUN, CAP_MEDIA_CONTROL, CAP_MEDIA_INFO, CAP_RESOURCE_INFO, CAP_WEB_OPEN, ERROR_NOT_ALLOWED};
 
 pub struct Permission {
     /// 프로토콜 CAP_* 상수와 동일한 식별자. decks.json과 CLI에서 사용
@@ -28,6 +28,8 @@ pub struct Permission {
 pub const PERMISSIONS: &[Permission] = &[
     Permission { id: CAP_MEDIA_INFO, title: "재생 정보 공유", about: "재생 중인 곡의 제목·아티스트·앨범·진행 상태를 덱에 표시합니다", default: true },
     Permission { id: CAP_MEDIA_CONTROL, title: "미디어 제어", about: "덱에서 재생/일시정지, 곡 이동, 탐색, 반복·셔플을 제어합니다", default: true },
+    Permission { id: CAP_AUDIO_INFO, title: "음량 정보 공유", about: "출력 장치와 소리를 내는 앱의 이름·음량·출력 장치를 덱에 보냅니다 (레벨 미터는 덱에 음량 믹서가 있을 때만 측정)", default: true },
+    Permission { id: CAP_AUDIO_CONTROL, title: "음량 제어", about: "덱의 음량 믹서에서 앱과 출력 장치의 음량·음소거, 앱의 출력 장치, 기본 출력 장치를 바꿉니다", default: false },
     Permission { id: CAP_RESOURCE_INFO, title: "리소스 사용량 공유", about: "PC의 CPU·메모리·GPU·디스크·네트워크·온도를 덱에 보냅니다 (위젯에 등록된 항목만 측정)", default: true },
     Permission { id: CAP_COMMAND_RUN, title: "명령 실행", about: "PC에 등록된 명령을 덱에서 실행하고 스위치·노브 값을 조회/변경합니다 (등록된 항목만 가능, 커맨드 원문 비공개)", default: false },
     Permission { id: CAP_WEB_OPEN, title: "웹페이지 열기", about: "덱의 웹페이지 버튼으로 이 PC의 기본 브라우저에서 주소를 엽니다 (http/https 주소만)", default: false },
@@ -81,7 +83,8 @@ mod tests {
         let c = Choices::from([(CAP_MEDIA_CONTROL.to_string(), false)]);
         assert_eq!(check(&c, ACTION_MEDIA_PLAY_PAUSE), Err(ERROR_NOT_ALLOWED.to_string()));
         assert!(allowed(&c, CAP_MEDIA_INFO));
-        assert_eq!(caps(&c, |_| true), vec![CAP_MEDIA_INFO.to_string(), CAP_RESOURCE_INFO.to_string()]);
+        assert_eq!(caps(&c, |_| true), [CAP_MEDIA_INFO, CAP_AUDIO_INFO, CAP_RESOURCE_INFO].map(String::from));
+        assert!(!allowed(&Choices::new(), CAP_AUDIO_CONTROL), "음량 제어가 기본으로 허용됨");
         assert!(!caps(&Choices::new(), |_| true).contains(&CAP_COMMAND_RUN.to_string()));
         assert!(caps(&Choices::new(), |_| false).is_empty());
     }

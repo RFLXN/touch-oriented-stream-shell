@@ -105,6 +105,17 @@ pub enum HostMsg {
     MetricValues { values: std::collections::BTreeMap<String, f64> },
     /// 이 덱에 부여된 권한 변경(호스트 사용자가 연결 중 수정함). hello의 caps를 통째로 교체한다.
     Caps { caps: Vec<String> },
+    /// 음량 믹서 상태: 출력 장치와 소리를 내는 앱의 음량·음소거·출력 장치. audio.info 권한이 있을 때만 보낸다.
+    /// 접속 직후와 무엇이든 바뀔 때마다 전체를 보낸다. 오디오 서버에 연결하지 못했거나 권한을 끄면 null
+    Audio { audio: Option<Audio> },
+    /// 음량 믹서의 레벨 미터 값(0~1, 직전 구간의 최대 진폭). 덱이 구독(watch의 audio) 중일 때만 AUDIO_LEVEL_EVERY마다,
+    /// 값이 바뀐 것만 보낸다. 앱은 AudioApp.id, 출력 장치는 AudioOutput.id로 찾는다
+    AudioLevels {
+        #[serde(default)]
+        apps: std::collections::BTreeMap<String, f64>,
+        #[serde(default)]
+        outputs: std::collections::BTreeMap<String, f64>,
+    },
     /// 덱이 요청한 액션의 처리 결과. 권한이 없으면 error에 ERROR_NOT_ALLOWED가 담긴다.
     Result { id: u64, ok: bool, error: String },
     /// 덱 금고 요청. id는 vault_reply와 매칭하는 시퀀스 번호, op는 VAULT_* 중 하나, service는 SERVICE_* 중 하나.
@@ -150,7 +161,12 @@ pub enum DeckMsg {
     Denied { reason: String },
     /// 덱이 현재 화면에 표시 중인 리소스 목록(해당 호스트를 가리키는 리소스 위젯에서 선택된 항목 전체).
     /// 호스트는 여기에 포함된 항목만 측정해 metric_values로 보낸다. 접속 직후와 레이아웃 변경 시 전체를 전송하며, 비어 있으면 측정하지 않는다.
-    Watch { metrics: Vec<String> },
+    /// audio는 이 호스트를 가리키는 음량 믹서 위젯이 있는지다. true일 때만 호스트가 레벨을 재서 audio_levels로 보낸다.
+    Watch {
+        metrics: Vec<String>,
+        #[serde(default)]
+        audio: bool,
+    },
     /// 액션 요청. id는 result 응답과 매칭하는 시퀀스 번호, name은 아래 ACTION_* 중 하나
     Action {
         id: u64,
@@ -250,6 +266,19 @@ pub const ACTION_COMMAND_SET: &str = "command.set";
 /// 호스트는 http:// 또는 https:// 주소만 연다(다른 스킴은 그 스킴을 처리하는 프로그램을 실행할 수 있으므로 거절한다).
 pub const ACTION_WEB_OPEN: &str = "web.open";
 
+/// 음량 설정. args: {"app": "<AudioApp.id>", "volume": 0.5} 또는 {"output": "<AudioOutput.id>", "volume": 0.5}
+/// volume은 0~1(1이 100%)이며 범위를 벗어나면 호스트가 잘라 낸다. 채널 사이의 균형은 유지한다
+pub const ACTION_AUDIO_VOLUME: &str = "audio.volume";
+/// 음소거 켜기/끄기. args: {"app" 또는 "output": .., "on": true}
+pub const ACTION_AUDIO_MUTE: &str = "audio.mute";
+/// 앱의 출력 장치 변경. args: {"app": "<AudioApp.id>", "output": "<AudioOutput.id>"}. 그 앱의 모든 스트림을 옮긴다
+pub const ACTION_AUDIO_ROUTE: &str = "audio.route";
+/// 기본 출력 장치 변경. args: {"output": "<AudioOutput.id>"}
+pub const ACTION_AUDIO_DEFAULT: &str = "audio.default";
+
+/// 호스트가 audio_levels를 보내는 주기
+pub const AUDIO_LEVEL_EVERY: Duration = Duration::from_millis(100);
+
 /// 반복 모드 (Media.loop_mode, media.loop의 mode)
 pub const LOOP_NONE: &str = "none";
 pub const LOOP_PLAYLIST: &str = "playlist";
@@ -263,6 +292,8 @@ pub const CAP_MEDIA_CONTROL: &str = "media.control";
 pub const CAP_RESOURCE_INFO: &str = "resource.info";
 pub const CAP_COMMAND_RUN: &str = "command.run";
 pub const CAP_WEB_OPEN: &str = "web.open";
+pub const CAP_AUDIO_INFO: &str = "audio.info";
+pub const CAP_AUDIO_CONTROL: &str = "audio.control";
 
 /// 권한이 없는 액션을 요청했을 때 반환되는 result의 error
 pub const ERROR_NOT_ALLOWED: &str = "not_allowed";
@@ -273,8 +304,49 @@ pub fn action_cap(action: &str) -> Option<&'static str> {
         ACTION_MEDIA_PLAY_PAUSE | ACTION_MEDIA_NEXT | ACTION_MEDIA_PREV | ACTION_MEDIA_SEEK | ACTION_MEDIA_SHUFFLE | ACTION_MEDIA_LOOP => Some(CAP_MEDIA_CONTROL),
         ACTION_COMMAND_RUN | ACTION_COMMAND_SET => Some(CAP_COMMAND_RUN),
         ACTION_WEB_OPEN => Some(CAP_WEB_OPEN),
+        ACTION_AUDIO_VOLUME | ACTION_AUDIO_MUTE | ACTION_AUDIO_ROUTE | ACTION_AUDIO_DEFAULT => Some(CAP_AUDIO_CONTROL),
         _ => None,
     }
+}
+
+/// 음량 믹서 상태 (HostMsg::Audio)
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct Audio {
+    /// 출력 장치(PulseAudio의 sink). 호스트가 정한 순서대로 표시한다
+    pub outputs: Vec<AudioOutput>,
+    /// 소리를 내는 앱. 같은 앱의 스트림(브라우저 탭 등)은 하나로 묶는다
+    pub apps: Vec<AudioApp>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct AudioOutput {
+    /// 장치의 고유 이름(PulseAudio sink 이름). 액션에서 이 값으로 가리킨다
+    pub id: String,
+    /// 화면에 표시할 이름(장치 설명)
+    pub title: String,
+    /// 음량(1이 100%). 채널마다 다르면 가장 큰 값
+    pub volume: f64,
+    pub muted: bool,
+    /// 기본 출력 장치인지
+    #[serde(default)]
+    pub default: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct AudioApp {
+    /// 앱을 묶는 키(호스트가 정한다. 앱을 다시 시작해도 대개 같다). 액션에서 이 값으로 가리킨다
+    pub id: String,
+    /// 화면에 표시할 앱 이름
+    pub name: String,
+    /// 음량(1이 100%). 스트림이 여럿이면 가장 큰 값
+    pub volume: f64,
+    /// 모든 스트림이 음소거인지
+    pub muted: bool,
+    /// 출력 장치(AudioOutput.id). 스트림들이 서로 다른 장치로 나가면 빈 문자열
+    pub output: String,
+    /// 묶인 스트림 수
+    #[serde(default)]
+    pub streams: u32,
 }
 
 /// 측정 가능한 리소스 항목 (HostMsg::Metrics). 덱 자체 리소스도 동일한 구조체를 사용한다.
@@ -430,6 +502,14 @@ mod tests {
     }
 
     #[test]
+    fn watch_from_before_audio_reads_as_not_watching_audio() {
+        let m: DeckMsg = serde_json::from_str(r#"{"t":"watch","metrics":["cpu"]}"#).unwrap();
+        assert_eq!(m, DeckMsg::Watch { metrics: vec!["cpu".into()], audio: false });
+        let m: HostMsg = serde_json::from_str(r#"{"t":"audio_levels","apps":{"firefox":0.5}}"#).unwrap();
+        assert!(matches!(m, HostMsg::AudioLevels { apps, outputs } if apps["firefox"] == 0.5 && outputs.is_empty()));
+    }
+
+    #[test]
     fn action_args_are_optional() {
         let m: DeckMsg = serde_json::from_str(r#"{"t":"action","id":7,"name":"media.next"}"#).unwrap();
         assert_eq!(m, DeckMsg::Action { id: 7, name: ACTION_MEDIA_NEXT.into(), args: serde_json::Value::Null });
@@ -483,6 +563,9 @@ mod tests {
         assert_eq!(action_cap(ACTION_COMMAND_RUN), Some(CAP_COMMAND_RUN));
         assert_eq!(action_cap(ACTION_COMMAND_SET), Some(CAP_COMMAND_RUN));
         assert_eq!(action_cap(ACTION_WEB_OPEN), Some(CAP_WEB_OPEN));
+        for a in [ACTION_AUDIO_VOLUME, ACTION_AUDIO_MUTE, ACTION_AUDIO_ROUTE, ACTION_AUDIO_DEFAULT] {
+            assert_eq!(action_cap(a), Some(CAP_AUDIO_CONTROL));
+        }
         assert_eq!(action_cap("exec"), None);
         assert_eq!(action_cap(""), None);
     }

@@ -1,8 +1,8 @@
 //! toss-connector — 덱과 통신하는 호스트 데몬 및 CLI. 명령어와 옵션은 아래 USAGE 참고(`toss-connector --help`).
 //!
 //! 인자 없이 실행하면 페어링된 덱에 접속해 데몬으로 동작한다(프로토콜: src/app/proto, 설계 문서: docs/04-host-link.md):
-//!   - 호스트 상태를 이벤트 기반으로 덱에 전송(재생 정보·앨범 아트, 등록된 명령과 상태 값, 리소스 사용량)
-//!   - 덱의 요청 실행(미디어 제어, 등록된 명령 실행 및 값 설정; 덱은 등록된 항목 중에서만 선택 가능, 웹페이지 열기)
+//!   - 호스트 상태를 이벤트 기반으로 덱에 전송(재생 정보·앨범 아트, 등록된 명령과 상태 값, 리소스 사용량, 음량 믹서)
+//!   - 덱의 요청 실행(미디어 제어, 음량 제어, 등록된 명령 실행 및 값 설정; 덱은 등록된 항목 중에서만 선택 가능, 웹페이지 열기)
 //!   - 덱 금고 중계: 외부 연동 키는 덱에 보관하고, 이 PC는 덱에서 빌린 토큰만 쓴다(Discord). Spotify는 덱이 직접 쓰며
 //!     이 PC는 키 저장과 브라우저 로그인만 돕는다
 //!
@@ -22,10 +22,11 @@
 //!   console   웹 콘솔 및 HTTP API 서버
 //!   store     설정 디렉터리 관리(키 쌍, 페어링 목록).  jsonfile  안전한 JSON 읽기/쓰기
 //!   trust     덱별 권한 테이블 및 검증.  managed  시스템(NixOS) 관리 설정
-//!   commands  사용자 명령 등록/실행/감시.  media, art  미디어 제어 및 앨범 아트.  meter  리소스 측정
+//!   commands  사용자 명령 등록/실행/감시.  media, art  미디어 제어 및 앨범 아트.  meter  리소스 측정.  audio  음량 믹서(PulseAudio)
 //!   vault     덱 금고 요청 중계.  discord  Discord 앱 연결(로컬 RPC).  spotify  Spotify 로그인(승인 코드를 덱에 전달).  web  웹페이지 열기
 
 mod art;
+mod audio;
 mod cli;
 mod commands;
 mod console;
@@ -81,6 +82,8 @@ const USAGE: &str = "사용법:
   toss-connector command set <id 또는 이름> <값>   로컬 PC에서 값 적용 테스트 (on/off, 단계 이름, 숫자)
   toss-connector command state <id 또는 이름>      현재 상태 조회 테스트
                                  덱에서 사용하려면 해당 덱에 command.run 권한이 필요합니다 (toss-connector allow command.run).
+  toss-connector audio                덱의 음량 믹서에 보일 출력 장치와 앱 목록 출력 (PulseAudio 또는 pipewire-pulse 필요)
+  toss-connector audio levels         위 목록에 이어 레벨 미터 값을 계속 출력 (Ctrl+C로 종료)
   toss-connector managed              시스템 관리 설정(NixOS programs.toss-connector.config) 조회
   toss-connector managed check <파일>  시스템 관리 설정 파일 검증 (NixOS 모듈 빌드 시 사용)
   toss-connector console              웹 콘솔을 브라우저로 열기 (실행 중인 데몬이 로컬에서 서빙)
@@ -156,6 +159,11 @@ fn main() {
         "allow" | "deny" => cli::set_trust(&store, &rest, command == "allow"),
         "command" => cli::command(&store.commands(), store.dir(), &rest, &tail),
         "managed" => cli::managed(&store, &rest),
+        "audio" => match rest.first().map(String::as_str) {
+            None => cli::audio(false),
+            Some("levels") => cli::audio(true),
+            Some(other) => usage(&format!("알 수 없는 명령: audio {other}")),
+        },
         "console" => console::cli(&store, &rest),
         "discord" => console::discord_cli(&store, rest.first().map(String::as_str)),
         "spotify" => console::spotify_cli(&store, rest.first().map(String::as_str)),
@@ -178,7 +186,7 @@ fn misplaced(command: &str, rest: &[String], deck: bool, tail: bool, no_console:
     }
     let most = match (command, first) {
         ("pair" | "list", _) => 0,
-        ("forget" | "sleep" | "wake" | "trust" | "discord" | "spotify", _) => 1,
+        ("forget" | "sleep" | "wake" | "trust" | "discord" | "spotify" | "audio", _) => 1,
         ("managed", Some("check")) => 2,
         ("managed", _) => 1,
         ("console", Some("allow" | "deny" | "port")) => 2,
