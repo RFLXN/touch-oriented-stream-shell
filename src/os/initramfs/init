@@ -45,6 +45,9 @@ setup_gadget() {
   echo 0x1d6b >"$g/idVendor"
   echo 0x0104 >"$g/idProduct"
   echo 0x0200 >"$g/bcdUSB"
+  # Windows는 VID·PID·bcdDevice마다 MS OS 디스크립터 조회 결과를 레지스트리(usbflags)에 캐시한다.
+  # 기본값(커널 버전)을 쓰면 커널을 올릴 때마다 값이 바뀌므로 고정한다. 디스크립터 구성을 바꾸면 이 값을 올려 Windows가 다시 조회하게 한다.
+  echo 0x0100 >"$g/bcdDevice"
   mkdir -p "$g/strings/0x409"
   echo "Toss Front" >"$g/strings/0x409/manufacturer"
   echo "Toss Front Alpine" >"$g/strings/0x409/product"
@@ -57,6 +60,15 @@ setup_gadget() {
   echo "02:54:46:00:00:02" >"$g/functions/rndis.usb0/host_addr"
   ln -s "$g/functions/rndis.usb0" "$g/configs/c.1/"
   ln -s "$g/functions/acm.usb0" "$g/configs/c.1/"
+
+  # MS OS 디스크립터: Windows 기본 RNDIS 드라이버(rndiscmp.inf)는 호환 ID `RNDIS`/`5162001`로만 자동 설치된다.
+  # 없으면 RNDIS 인터페이스가 드라이버 없는 장치(코드 28)로 남는다. 리눅스·macOS 호스트는 이 디스크립터를 무시한다.
+  echo 1 >"$g/os_desc/use"
+  echo 0xcd >"$g/os_desc/b_vendor_code"
+  echo MSFT100 >"$g/os_desc/qw_sign"
+  echo RNDIS >"$g/functions/rndis.usb0/os_desc/interface.rndis/compatible_id"
+  echo 5162001 >"$g/functions/rndis.usb0/os_desc/interface.rndis/sub_compatible_id"
+  ln -s "$g/configs/c.1" "$g/os_desc/"
 
   udc=$(ls /sys/class/udc 2>/dev/null | head -n 1)
   [ -n "$udc" ] || return 1

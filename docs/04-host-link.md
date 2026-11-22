@@ -833,6 +833,8 @@ toss-connector console         # 브라우저로 열기 (토큰 자동 첨부)
 
 ### 신규 OS 지원 (Windows, macOS)
 
+USB 연결: 덱의 USB 가젯은 MS OS 디스크립터를 내보내므로 Windows 10 이상은 별도 드라이버 설치 없이 RNDIS 어댑터("Remote NDIS Compatible Device")를 잡고 DHCP로 `172.16.42.2`를 받는다(`src/os/initramfs/init`의 `setup_gadget()`). 단, 덱이 켜진 상태에서 케이블을 꽂으면 Windows가 장치 설명자를 읽지 못하는 경우가 있다(코드 43). 덱을 케이블을 꽂은 채로 부팅하면 정상 인식된다.
+
 `src/app/host/src/media.rs`의 `open()`에 해당 OS용 백엔드를 추가한다. `MediaControl` 트레이트 메서드 3종(`poll`: 현재 재생 상태·아트 URL 조회, `action`: 제어 실행, `on_change`: 변경 알림 콜백 등록 — 알림 API가 없으면 빈 구현으로도 2초 폴링으로 동작)을 구현하면 된다. 변경 판정(`changed`)과 앨범 아트 리사이징 로직은 OS 무관 공용이다.
 
 ### 테스트 및 검증

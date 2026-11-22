@@ -449,7 +449,7 @@ ramoops 사용 요령: 전원을 뽑으면 내용이 날아가므로 커널이 �
 ### initramfs (`src/os/initramfs/init`)
 
 0. 부팅 인자에 `tf.splash`가 있고 `/splash.ppm`이 있으면 프레임버퍼 콘솔을 떼고 스플래시를 그린다. `/splash.frames`가 있으면 애니메이션 재생기를 띄운다(2.6절의 "부팅 스플래시"). 프레임버퍼를 최대 3초 기다리고, 없으면 건너뛴다.
-1. USB 가젯을 올린다: USB 이더넷(RNDIS) + 가상 시리얼(ACM). 루트 파일시스템이 망가져도 Micro USB로 접속할 수 있게 가장 먼저 올린다.
+1. USB 가젯을 올린다: USB 이더넷(RNDIS) + 가상 시리얼(ACM). 루트 파일시스템이 망가져도 Micro USB로 접속할 수 있게 가장 먼저 올린다. Windows가 기본 RNDIS 드라이버를 자동 설치하도록 MS OS 디스크립터(호환 ID `RNDIS`/`5162001`)도 함께 내보낸다. Windows는 이 조회 결과를 VID·PID·`bcdDevice`별로 캐시하므로 `bcdDevice`를 고정값(`0x0100`)으로 두고, 디스크립터 구성을 바꿀 때 이 값을 올린다.
 2. `userdata` 파티션을 찾아 마운트한다. GPT 이름이 `userdata`인 파티션 중 첫 번째이며, 장치가 잡힐 때까지 최대 10초 기다린다.
 3. 이더넷 MAC 주소를 `/etc/tossfront/eth0.mac` 값으로 설정한다.
 4. Alpine init으로 제어권을 넘긴다.
