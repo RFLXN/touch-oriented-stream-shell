@@ -701,7 +701,7 @@ mod tests {
 
     /// managed에 JSON 문자열을 주면 설정 디렉터리의 managed.json으로 사용
     fn rig_with(name: &str, player: FakePlayer, managed: Option<&str>) -> Rig {
-        let dir = std::env::temp_dir().join(format!("toss-connector-test-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("toss-connector-test-session-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let managed = managed.map(|text| {
