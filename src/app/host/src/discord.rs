@@ -11,6 +11,7 @@
 //!
 //! IPC 소켓: `$XDG_RUNTIME_DIR`(없으면 `$TMPDIR`, `$TMP`, `$TEMP`, `/tmp`)의 `discord-ipc-0`~`9`.
 //! Flatpak(`app/com.discordapp.Discord/`)과 Snap(`snap.discord/`)으로 설치한 Discord의 위치도 찾는다.
+//! Windows에서는 명명된 파이프 `\\.\pipe\discord-ipc-0`~`9`를 쓴다(프레임 형식은 같다).
 //! 프레임: opcode(u32 리틀 엔디안) + 길이(u32 리틀 엔디안) + JSON. opcode는 0 HANDSHAKE, 1 FRAME, 2 CLOSE, 3 PING, 4 PONG.
 //!
 //! 음성 권한(`rpc.voice.*`)은 Discord가 승인한 앱이나 그 앱의 테스터(최대 50명)에게만 열려 있다.
@@ -24,7 +25,7 @@ use toss_proto::{KIND_SWITCH, SERVICE_DISCORD, VAULT_BEGIN, VAULT_TOKEN};
 
 use crate::vault;
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 mod live;
 pub use live::{hold, status, Hold};
 
@@ -54,29 +55,34 @@ pub struct Who {
 pub const STEP_DECK: &str = "deck";
 pub const STEP_DISCORD: &str = "discord";
 
+/// IPC 전송 계층(유닉스 소켓). 읽기는 소켓의 읽기 제한 시간을 쓴다.
 #[cfg(unix)]
-mod ipc {
-    use std::collections::VecDeque;
-    use std::io::{ErrorKind, Read, Write};
+mod stream {
+    use std::io::{self, Read, Write};
     use std::os::unix::net::UnixStream;
-    use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{Duration, Instant};
+    use std::path::{Path, PathBuf};
+    use std::time::Duration;
 
-    use serde_json::{json, Value};
+    pub struct Stream(UnixStream);
 
-    use super::{FRAME_MAX, OP_CLOSE, OP_FRAME, OP_HANDSHAKE, OP_PING, OP_PONG, REPLY_WAIT};
+    impl Stream {
+        pub fn connect(path: &Path) -> io::Result<Self> {
+            UnixStream::connect(path).map(Self)
+        }
 
-    /// Discord 앱과의 IPC 연결 하나. 명령의 응답을 기다리는 동안 도착한 이벤트(`DISPATCH`)는 버리지 않고 쌓아 두었다가 `event`로 돌려준다.
-    pub struct Ipc {
-        s: UnixStream,
-        buf: Vec<u8>,
-        events: VecDeque<Value>,
-        lost: bool,
+        /// `wait` 안에 도착한 데이터를 읽는다. 오지 않으면 WouldBlock 또는 TimedOut 오류, 상대가 닫았으면 0
+        pub fn read_within(&mut self, buf: &mut [u8], wait: Duration) -> io::Result<usize> {
+            self.0.set_read_timeout(Some(wait))?;
+            self.0.read(buf)
+        }
+
+        pub fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+            self.0.write_all(bytes)
+        }
     }
 
-    /// Discord 앱이 열어 둔 IPC 소켓 후보
-    pub fn sockets() -> Vec<PathBuf> {
+    /// Discord 앱이 열어 둘 수 있는 IPC 소켓 후보
+    pub fn places() -> Vec<PathBuf> {
         let mut bases: Vec<PathBuf> = ["XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP"].iter().filter_map(std::env::var_os).map(PathBuf::from).collect();
         bases.push("/tmp".into());
         let mut out = Vec::new();
@@ -88,6 +94,103 @@ mod ipc {
             }
         }
         out
+    }
+
+    /// 지금 열려 있는 IPC 소켓
+    pub fn present() -> Vec<PathBuf> {
+        places().into_iter().filter(|p| p.exists()).collect()
+    }
+}
+
+/// IPC 전송 계층(Windows 명명된 파이프). 동기 파이프는 읽기 제한 시간이 없으므로
+/// `PeekNamedPipe`로 도착한 바이트가 있는지 확인한 뒤 그만큼만 읽는다(읽기가 막혀 쓰기까지 멈추는 일이 없다).
+#[cfg(windows)]
+mod stream {
+    use std::fs::{File, OpenOptions};
+    use std::io::{self, Read, Write};
+    use std::os::windows::io::AsRawHandle;
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, Instant};
+
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::Pipes::PeekNamedPipe;
+
+    /// 데이터 도착 여부를 확인하는 간격
+    const PEEK_EVERY: Duration = Duration::from_millis(10);
+    const PIPE_DIR: &str = r"\\.\pipe\";
+
+    pub struct Stream(File);
+
+    impl Stream {
+        pub fn connect(path: &Path) -> io::Result<Self> {
+            OpenOptions::new().read(true).write(true).open(path).map(Self)
+        }
+
+        /// `wait` 안에 도착한 데이터를 읽는다. 오지 않으면 TimedOut 오류, 파이프가 끊겼으면 0
+        pub fn read_within(&mut self, buf: &mut [u8], wait: Duration) -> io::Result<usize> {
+            let until = Instant::now() + wait;
+            loop {
+                let mut avail = 0u32;
+                let handle = HANDLE(self.0.as_raw_handle());
+                if unsafe { PeekNamedPipe(handle, None, 0, None, Some(&mut avail), None) }.is_err() {
+                    return Ok(0);
+                }
+                if avail > 0 {
+                    let n = buf.len().min(avail as usize);
+                    return self.0.read(&mut buf[..n]);
+                }
+                let left = until.saturating_duration_since(Instant::now());
+                if left.is_zero() {
+                    return Err(io::ErrorKind::TimedOut.into());
+                }
+                std::thread::sleep(left.min(PEEK_EVERY));
+            }
+        }
+
+        pub fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+            self.0.write_all(bytes)
+        }
+    }
+
+    /// Discord 앱이 열어 둘 수 있는 IPC 파이프 후보
+    pub fn places() -> Vec<PathBuf> {
+        (0..10).map(|n| PathBuf::from(format!(r"{PIPE_DIR}discord-ipc-{n}"))).collect()
+    }
+
+    /// 지금 열려 있는 IPC 파이프. 파이프에 `exists()`(파일 열기)를 쓰면 Discord에 빈 연결이 하나 생기므로 파이프 목록에서 찾는다
+    pub fn present() -> Vec<PathBuf> {
+        let open: Vec<String> = std::fs::read_dir(PIPE_DIR)
+            .map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().to_ascii_lowercase()).collect())
+            .unwrap_or_default();
+        places().into_iter().filter(|p| p.file_name().is_some_and(|n| open.contains(&n.to_string_lossy().to_ascii_lowercase()))).collect()
+    }
+}
+
+#[cfg(any(unix, windows))]
+mod ipc {
+    use std::collections::VecDeque;
+    use std::io::ErrorKind;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{Duration, Instant};
+
+    use serde_json::{json, Value};
+
+    use super::stream::Stream;
+    pub use super::stream::present;
+    use super::{FRAME_MAX, OP_CLOSE, OP_FRAME, OP_HANDSHAKE, OP_PING, OP_PONG, REPLY_WAIT};
+
+    /// Discord 앱과의 IPC 연결 하나. 명령의 응답을 기다리는 동안 도착한 이벤트(`DISPATCH`)는 버리지 않고 쌓아 두었다가 `event`로 돌려준다.
+    pub struct Ipc {
+        s: Stream,
+        buf: Vec<u8>,
+        events: VecDeque<Value>,
+        lost: bool,
+    }
+
+    /// Discord 앱이 열어 둘 수 있는 IPC 소켓(Windows는 파이프) 후보
+    pub fn sockets() -> Vec<PathBuf> {
+        super::stream::places()
     }
 
     fn nonce() -> String {
@@ -109,7 +212,7 @@ mod ipc {
         pub fn connect(client_id: &str, places: &[PathBuf]) -> Result<Self, String> {
             let mut last = "Discord 앱에 연결할 수 없습니다 (Discord 앱이 이 PC에서 실행 중인지 확인하세요)".to_string();
             for path in places {
-                let Ok(s) = UnixStream::connect(path) else { continue };
+                let Ok(s) = Stream::connect(path) else { continue };
                 let mut ipc = Ipc { s, buf: Vec::new(), events: VecDeque::new(), lost: false };
                 ipc.send(OP_HANDSHAKE, &json!({ "v": 1, "client_id": client_id }))?;
                 match ipc.recv(REPLY_WAIT) {
@@ -161,9 +264,8 @@ mod ipc {
                 if left.is_zero() {
                     return Ok(None);
                 }
-                self.s.set_read_timeout(Some(left)).map_err(|e| e.to_string())?;
                 let mut chunk = [0u8; 8192];
-                match self.s.read(&mut chunk) {
+                match self.s.read_within(&mut chunk, left) {
                     Ok(0) => {
                         self.lost = true;
                         return Err("Discord 앱과의 연결이 끊어졌습니다".into());
@@ -254,7 +356,7 @@ fn borrowed(v: &Value) -> Result<String, String> {
 }
 
 /// Discord 앱에서 승인을 받아 덱에 토큰을 발급받게 하고, 그 토큰으로 인증해 확인한다. `step`은 진행 단계가 바뀔 때마다 호출된다.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub fn link(step: impl Fn(&'static str)) -> Result<Who, String> {
     step(STEP_DECK);
     let (client_id, scopes) = begin()?;
@@ -268,7 +370,7 @@ pub fn link(step: impl Fn(&'static str)) -> Result<Who, String> {
 }
 
 /// 덱에서 토큰을 빌려 Discord 앱에 인증해 본다(승인 창 없음)
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub fn check(step: impl Fn(&'static str)) -> Result<Who, String> {
     step(STEP_DECK);
     let (client_id, _) = begin()?;
@@ -318,7 +420,7 @@ impl Action {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 mod live {
     use serde_json::Value;
 
@@ -341,12 +443,12 @@ mod live {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 pub fn link(_step: impl Fn(&'static str)) -> Result<Who, String> {
     Err("이 운영체제의 Discord 연결은 아직 지원하지 않습니다".into())
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 pub fn check(_step: impl Fn(&'static str)) -> Result<Who, String> {
     Err("이 운영체제의 Discord 연결은 아직 지원하지 않습니다".into())
 }
@@ -425,5 +527,23 @@ mod tests {
         assert_eq!(w, Who { name: "Name".into(), expires: "2026-11-26T00:00:00Z".into(), scopes: vec!["rpc".into()] });
         assert_eq!(who(&json!({ "user": { "username": "u", "global_name": null } })).unwrap().name, "u");
         assert!(who(&json!({})).is_err());
+    }
+}
+
+/// 이 PC에서 실행 중인 Discord 앱과의 파이프 왕복 확인: `cargo test discord_pipe -- --ignored --nocapture`
+/// 존재하지 않는 앱 ID로 HANDSHAKE하므로 Discord가 거절(CLOSE)로 답해야 한다(승인 창은 뜨지 않는다).
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::ipc;
+
+    #[test]
+    #[ignore]
+    fn discord_pipe_round_trip() {
+        let places = ipc::present();
+        println!("열린 Discord 파이프: {places:?}");
+        assert!(!places.is_empty(), "Discord 앱이 실행 중이어야 함");
+        let err = ipc::Ipc::connect("0", &places).err().expect("잘못된 앱 ID는 거절되어야 함");
+        println!("Discord 응답: {err}");
+        assert!(err.contains("거절"), "{err}");
     }
 }

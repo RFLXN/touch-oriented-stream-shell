@@ -47,7 +47,7 @@
 
 | 요구사항 | 설계 결정 |
 |---|---|
-| 리눅스, Windows, macOS 모두 지원 | 호스트 커넥터는 단일 Rust 코드베이스로 작성하고, OS 종속 부분만 모듈 내부에서 분기(현재는 리눅스만 구현) |
+| 리눅스, Windows, macOS 모두 지원 | 호스트 커넥터는 단일 Rust 코드베이스로 작성하고, OS 종속 부분만 모듈 내부에서 분기(현재 리눅스와 Windows 구현) |
 | 실시간성(재생 정보 즉시 반영, 빠른 조작 응답) | 상시 연결을 유지한 채 양쪽이 필요할 때 바로 푸시. 요청-응답 방식 아님. **상태는 이벤트 발생 시, 또는 값이 바뀔 때만 전송**(4.7절) |
 | USB와 LAN(이더넷, Wi-Fi) 모두 지원 | 모든 경로를 IP 기반으로 통합. USB도 네트워크(USB 이더넷)로 취급하므로 전송 계층을 경로별로 구현할 필요 없음 |
 | 어느 경로로 붙어도 동일 기기로 식별 | IP 주소가 아니라 **공개키가 신원(ID)** |
@@ -601,9 +601,11 @@ nix build .#toss-connector -o dist/toss-connector && ./dist/toss-connector/bin/t
 | `src/discord.rs` | Discord 앱의 로컬 RPC(IPC 소켓) 클라이언트, 연결(`link`)·확인(`check`) 절차, 명령으로 쓸 수 있는 Discord 동작 목록(`ACTIONS`) |
 | `src/spotify.rs` | Spotify 로그인 돕기: 덱에서 받은 공개 값으로 승인 주소를 만들고, 브라우저가 돌아온 콜백의 `state`를 확인해 승인 코드를 덱에 넘긴다 |
 | `src/discord/live.rs` | Discord 상주 연결: 쓰는 곳이 있는 동안 연결을 유지하고(재연결 포함) 구독한 이벤트의 최신 값을 기억한다. Discord 동작 명령이 이 연결로 값을 쓰고 읽는다 |
-| `src/web.rs` | 웹페이지 열기(`web.open`): 주소 검증과 `xdg-open` 실행 |
+| `src/media/gsmtc.rs` | Windows 미디어 백엔드(GSMTC): 세션 선택, 재생 정보·타임라인·앨범 아트(임시 파일) 읽기, 재생 제어, 변경 이벤트 구독 |
+| `src/web.rs` | 웹페이지 열기(`web.open`): 주소 검증과 `xdg-open`(Windows는 `ShellExecuteW`) 실행 |
 | `src/audio.rs` | 음량 믹서 스레드(`Mixer`): 오디오 서버 연결·재연결, 세션의 요청 전달, 앱 묶기(`app_of`), 바뀐 레벨 고르기 |
 | `src/audio/pulse.rs` | PulseAudio 연결(리눅스 전용): 장치·스트림·클라이언트 읽기, 피크 측정 스트림, 음량 액션 실행 |
+| `src/audio/wasapi.rs` | Core Audio 연결(Windows 전용): 재생 장치·앱 세션 폴링, 피크 미터, 음량·음소거, 기본 장치 변경(비공개 `IPolicyConfig`). 앱별 출력 장치 변경은 미지원 |
 | `console/` | 웹 콘솔의 프론트엔드(정적 파일 3개). 빌드 시 바이너리에 내장 |
 
 ### NixOS에 설치 (`programs.toss-connector`)
@@ -835,7 +837,14 @@ toss-connector console         # 브라우저로 열기 (토큰 자동 첨부)
 
 USB 연결: 덱의 USB 가젯은 MS OS 디스크립터를 내보내므로 Windows 10 이상은 별도 드라이버 설치 없이 RNDIS 어댑터("Remote NDIS Compatible Device")를 잡고 DHCP로 `172.16.42.2`를 받는다(`src/os/initramfs/init`의 `setup_gadget()`). 단, 덱이 켜진 상태에서 케이블을 꽂으면 Windows가 장치 설명자를 읽지 못하는 경우가 있다(코드 43). 덱을 케이블을 꽂은 채로 부팅하면 정상 인식된다.
 
-`src/app/host/src/media.rs`의 `open()`에 해당 OS용 백엔드를 추가한다. `MediaControl` 트레이트 메서드 3종(`poll`: 현재 재생 상태·아트 URL 조회, `action`: 제어 실행, `on_change`: 변경 알림 콜백 등록 — 알림 API가 없으면 빈 구현으로도 2초 폴링으로 동작)을 구현하면 된다. 변경 판정(`changed`)과 앨범 아트 리사이징 로직은 OS 무관 공용이다.
+Windows 구현: 미디어는 GSMTC(`src/media/gsmtc.rs`), 음량 믹서는 Core Audio(`src/audio/wasapi.rs`), 리소스는 PDH·DXGI·Win32 API(`src/app/meter/src/windows.rs`), Discord는 명명된 파이프 `\\.\pipe\discord-ipc-N`(`src/discord.rs`의 `stream`), 웹페이지 열기는 `ShellExecuteW`를 쓴다. 차이점은 다음과 같다.
+
+- 리소스: 온도·팬·전력, 부하 평균(`load`), 스왑은 제공하지 않는다(표준 API가 없거나 관리자 권한 필요). GPU 사용률은 작업 관리자처럼 가장 바쁜 엔진의 값이다
+- 음량 믹서: 앱별 출력 장치 변경(`audio.route`)은 공개 API가 없어 오류를 돌려준다. 상태는 0.5초마다 폴링한다
+- 미디어: 앨범 아트는 이미지 스트림으로 받아 임시 폴더(`%TEMP%\toss-connector-art`)에 저장한 뒤 `file:///` URL로 넘긴다. 곡 길이를 보고하지 않는 앱은 `rate`를 0으로 보낸다
+- 실제 PC 확인용 테스트(무시 표시): `cargo test show_this_pc -- --ignored --nocapture`(미디어), `show_this_pc_audio`(음량 믹서), `discord_pipe_round_trip`(Discord 파이프), 리소스는 `cd src/app/meter && cargo run --example show`
+
+새 OS를 추가할 때는 `src/app/host/src/media.rs`의 `open()`에 해당 OS용 백엔드를 추가한다. `MediaControl` 트레이트 메서드 3종(`poll`: 현재 재생 상태·아트 URL 조회, `action`: 제어 실행, `on_change`: 변경 알림 콜백 등록 — 알림 API가 없으면 빈 구현으로도 2초 폴링으로 동작)을 구현하면 된다. 변경 판정(`changed`)과 앨범 아트 리사이징 로직은 OS 무관 공용이다.
 
 ### 테스트 및 검증
 
@@ -859,7 +868,7 @@ USB 연결: 덱의 USB 가젯은 MS OS 디스크립터를 내보내므로 Window
 | PC 설정 UI | 브라우저 기반 웹 콘솔(권한, 명령, 페어링, 절전). `toss-connector`가 로컬 전용으로 서빙하며 외부 페이지는 Origin 허용 목록으로 제한 | 실제 HTTPS 호스팅 페이지 연동 검증(브라우저별 동작 차이 가능, 아래 "미검증 항목" 참고), 덱 IP 자동 탐색. 콘솔 토큰 전달 개선: 현재 `toss-connector console`이 토큰 포함 URL을 `xdg-open` 인자로 넘기므로 그동안 같은 PC의 다른 사용자가 프로세스 목록에서 볼 수 있음(일회용 코드 교환 방식 검토). 콘솔에서 설정한 명령 값을 연결된 덱에 즉시 푸시(`--state`가 없는 명령은 콘솔/CLI로 값을 바꿔도 덱에 전달 안 됨) |
 | 다중 호스트 | 덱은 여러 호스트와 페어링·동시 연결 가능. 위젯별로 대상 호스트 지정(추가 시 선택, 미지정 시 연결된 첫 호스트) | 위젯 추가 후 대상 호스트 변경 UI. 실제 다중 호스트 동시 접속 실기기 테스트 |
 | 다중 덱 | 호스트는 여러 덱과 페어링 가능하나 한 번에 1대만 연결 | 다중 덱 동시 연결 |
-| 지원 OS | 리눅스(MPRIS) | Windows, macOS |
+| 지원 OS | 리눅스(MPRIS, PulseAudio), Windows(GSMTC, Core Audio) | macOS. Windows 자동 실행과 트레이, 앱별 출력 장치 변경, 온도 측정 |
 | 제공 기능 | 리소스 모니터링(CPU, 메모리, GPU, 디스크, 네트워크, 온도). 재생 정보·앨범 아트 표시, 재생/일시정지, 트랙 이동, ±5초 시크, 반복, 셔플. PC 등록 명령 실행, 스위치, 단계 노브, 연속 노브(상태는 PC가 보고). 덱의 웹페이지 버튼으로 PC 브라우저에서 주소 열기. 음량 믹서(앱별·출력 장치 음량, 음소거, 레벨 미터, 앱의 출력 장치와 기본 출력 장치 변경. PulseAudio/pipewire-pulse) | 키 입력 같은 내장 액션(현재는 셸 커맨드 등록으로 대체), 진행 바 터치 시크, 음량 믹서의 앱 아이콘과 마이크(입력) 쪽 등 |
 | 스위치·노브 상태 | 호스트가 등록된 모든 상태 조회 커맨드를 주기마다 실행 | 덱 레이아웃에 실제 배치된 명령만 폴링(리소스의 `watch`와 같은 구독 방식). 상태 변경 이벤트를 기다리는 push형 상태 커맨드 |
 | 리소스 수집 | 리눅스 CPU·메모리·GPU(AMD, NVIDIA)·디스크·네트워크·온도·팬·배터리. 덱 구독 항목만 측정 | Intel GPU 사용률, 프로세스별 사용량, 인터페이스·디스크 개별 속도, Windows·macOS 지원 |
@@ -919,7 +928,8 @@ USB 연결: 덱의 USB 가젯은 MS OS 디스크립터를 내보내므로 Window
 - 기존 설정 디렉터리의 `key`·`console-token` 권한 보정과 새로 쓰는 파일의 권한(0600), 신규 디렉터리 권한(0700) — 테스트 임시 디렉터리로만 확인
 - `--state` 타임아웃 시 장시간 실행 하위 프로세스 그룹 종료(테스트의 `sleep`으로만 확인)
 - `toss-connector command set` 실패 시 종료 코드 1 반환(단위 테스트로만 확인. 잉여 인자 종료 코드 2는 실제 CLI로 확인)
-- Windows·macOS 환경(컴파일만 가능, OS 구현 없음)
+- Windows: Windows 11 PC와 USB로 페어링한 덱에서 미디어 플레이어, 리소스 미터, 음량 믹서, 웹페이지 버튼, Discord 마이크 음소거 스위치(덱 금고의 기존 Discord 연결 재사용)를 실제로 사용해 확인함. 장시간 사용, 앱별 출력 장치 변경(미지원), 여러 미디어 앱 사이의 세션 전환은 확인하지 않음
+- macOS 환경(컴파일 여부도 미확인, OS 구현 없음)
 
 ### 보안 및 운영 참고 사항
 

@@ -35,7 +35,7 @@
 | OS | Alpine Linux 3.24 |
 | 화면 환경 | Wayland 키오스크(`cage`). 부팅 시 앱 하나가 전체 화면으로 실행됨 |
 | 앱 | 스트림덱 앱: Rust 데몬(`tossd`) + QML UI. 이 앱 하나가 전체 화면(상단바, 위젯, 설정)을 담당 |
-| PC 측 | `toss-connector`(Rust). PC에서 실행되어 덱에 연결한다. 웹 콘솔로 설정을 관리하며 NixOS에서는 모듈로 설치 가능(현재 Linux 전용) |
+| PC 측 | `toss-connector`(Rust). PC에서 실행되어 덱에 연결한다. 웹 콘솔로 설정을 관리하며 NixOS에서는 모듈로 설치 가능(Linux·Windows 지원, Windows는 `cargo build`로 직접 빌드) |
 
 ### 현재 지원 기능
 

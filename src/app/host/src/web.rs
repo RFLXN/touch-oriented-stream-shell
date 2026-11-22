@@ -1,9 +1,11 @@
 //! 웹페이지 열기: 덱의 웹페이지 버튼(`web.open`)이 보낸 주소를 이 PC의 기본 브라우저로 연다.
 //!
 //! http:// 또는 https:// 주소만 연다. 다른 스킴(file:, 사용자 정의 스킴 등)은 그 스킴에 연결된 프로그램을 실행할 수 있으므로 거절한다.
-//! 주소는 셸을 거치지 않고 여는 프로그램(Linux는 `xdg-open`, macOS는 `open`)의 인자로만 넘긴다.
+//! 주소는 셸을 거치지 않고 여는 프로그램(Linux는 `xdg-open`, macOS는 `open`)의 인자로만 넘긴다. Windows는 `ShellExecuteW`로 연다.
 
+#[cfg(not(windows))]
 use std::process::{Command, Stdio};
+#[cfg(not(windows))]
 use std::thread;
 
 /// 덱이 보낼 수 있는 주소 최대 길이(덱의 `layout::URL_MAX`와 같다)
@@ -19,6 +21,23 @@ pub fn check(url: &str) -> Result<(), String> {
 }
 
 /// 주소를 기본 브라우저로 연다(여는 프로그램이 끝나기를 기다리지 않는다)
+#[cfg(windows)]
+pub fn open(url: &str) -> Result<(), String> {
+    use windows::core::{w, HSTRING};
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    check(url)?;
+    // ShellExecute는 셸을 거치지 않고 http/https 스킴에 연결된 기본 브라우저로 연다. 32 이하의 반환값은 실패다.
+    let done = unsafe { ShellExecuteW(None, w!("open"), &HSTRING::from(url), None, None, SW_SHOWNORMAL) };
+    if done.0 as isize <= 32 {
+        return Err(format!("기본 브라우저로 열 수 없습니다 (ShellExecute {})", done.0 as isize));
+    }
+    Ok(())
+}
+
+/// 주소를 기본 브라우저로 연다(여는 프로그램이 끝나기를 기다리지 않는다)
+#[cfg(not(windows))]
 pub fn open(url: &str) -> Result<(), String> {
     check(url)?;
     let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };

@@ -46,14 +46,14 @@ const SETTLE: Duration = Duration::from_millis(40);
 const ART_TRIES: u32 = 3;
 
 /// 현재 호스트 환경에서 실제로 지원 가능한 기능인지 확인(권한이 켜져 있어도 불가능한 기능은 광고하지 않음).
-/// 음량 믹서는 리눅스에서 광고한다(오디오 서버가 없으면 상태가 null이다). 테스트에서는 PC의 실제 오디오 서버에 붙지 않도록 끈다.
+/// 음량 믹서는 리눅스와 Windows에서 광고한다(오디오 서버가 없으면 상태가 null이다). 테스트에서는 PC의 실제 오디오 서버에 붙지 않도록 끈다.
 pub fn can(has_media: bool, cap: &str) -> bool {
     match cap {
         CAP_MEDIA_INFO | CAP_MEDIA_CONTROL => has_media,
-        CAP_AUDIO_INFO | CAP_AUDIO_CONTROL => cfg!(all(target_os = "linux", not(test))),
+        CAP_AUDIO_INFO | CAP_AUDIO_CONTROL => cfg!(all(any(target_os = "linux", windows), not(test))),
         CAP_COMMAND_RUN => true,
-        CAP_RESOURCE_INFO => cfg!(target_os = "linux"),
-        CAP_WEB_OPEN => cfg!(any(target_os = "linux", target_os = "macos")),
+        CAP_RESOURCE_INFO => cfg!(any(target_os = "linux", windows)),
+        CAP_WEB_OPEN => cfg!(any(target_os = "linux", target_os = "macos", windows)),
         _ => false,
     }
 }

@@ -12,7 +12,8 @@
 //! 가장 큰 채널이 그 값이 되도록 맞춘다.
 //!
 //! PulseAudio 메인 루프와 모든 콜백은 이 스레드 하나에서만 돈다(`pulse.rs`). 세션 스레드의 요청은 채널로 받아 메인 루프 사이사이에 처리한다.
-//! 리눅스 외의 OS에서는 서버에 연결하지 않으므로 상태가 항상 null이다. 핸들을 드롭하면 스레드가 종료된다.
+//! Windows는 Core Audio(WASAPI)로 같은 일을 한다(`wasapi.rs`, 앱별 출력 장치 변경은 지원하지 않음).
+//! 그 밖의 OS에서는 서버에 연결하지 않으므로 상태가 항상 null이다. 핸들을 드롭하면 스레드가 종료된다.
 
 use std::collections::BTreeMap;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -24,6 +25,8 @@ use toss_proto::Audio;
 
 #[cfg(target_os = "linux")]
 mod pulse;
+#[cfg(windows)]
+mod wasapi;
 
 /// 서버 재연결 간격, 요청 응답 대기 한도
 const RETRY_EVERY: Duration = Duration::from_secs(3);
@@ -69,7 +72,11 @@ fn run(rx: Receiver<Cmd>, mut watch: bool, on_event: impl Fn(Event)) {
     let mut said_none = false;
     loop {
         #[cfg(target_os = "linux")]
-        if let Some(mut server) = pulse::Server::connect() {
+        let connected = pulse::Server::connect();
+        #[cfg(windows)]
+        let connected = wasapi::Server::connect();
+        #[cfg(any(target_os = "linux", windows))]
+        if let Some(mut server) = connected {
             eprintln!("음량 믹서: 오디오 서버에 연결됨");
             said_none = false;
             match server.serve(&rx, &mut watch, &on_event) {

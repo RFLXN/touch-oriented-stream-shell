@@ -1,4 +1,4 @@
-//! 미디어 플레이어 제어 및 상태 조회(OS별 구현 분기, 현재 리눅스 MPRIS 지원).
+//! 미디어 플레이어 제어 및 상태 조회(OS별 구현 분기: 리눅스 MPRIS, Windows GSMTC).
 //!
 //! 덱에는 곡 변경, 재생/일시정지, 탐색 등 실제 상태 변화가 있을 때만 전송하고,
 //! 재생 중 경과 시간은 덱이 자체적으로 계산한다.
@@ -58,11 +58,18 @@ pub fn open() -> Result<Box<dyn MediaControl>, String> {
     {
         mpris::Mpris::open().map(|m| Box::new(m) as Box<dyn MediaControl>).map_err(|e| format!("D-Bus 세션에서 플레이어에 연결할 수 없습니다: {e}"))
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(windows)]
+    {
+        gsmtc::Gsmtc::open().map(|m| Box::new(m) as Box<dyn MediaControl>).map_err(|e| format!("Windows 미디어 세션 관리자에 연결할 수 없습니다: {}", e.message()))
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
     {
         Err("현재 OS의 미디어 제어는 아직 지원되지 않습니다".to_string())
     }
 }
+
+#[cfg(windows)]
+mod gsmtc;
 
 #[cfg(target_os = "linux")]
 mod mpris {

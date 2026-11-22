@@ -52,6 +52,12 @@ fn load(url: &str) -> Result<Vec<u8>, String> {
     };
     if let Some(path) = url.strip_prefix("file://") {
         let path = path.strip_prefix("localhost").unwrap_or(path);
+        // Windows의 file:///C:/... 는 드라이브 문자 앞의 `/`를 떼어야 경로가 된다
+        #[cfg(windows)]
+        let path = match path.as_bytes() {
+            [b'/', d, b':', ..] if d.is_ascii_alphabetic() => &path[1..],
+            _ => path,
+        };
         let mut f = std::fs::File::open(percent_decode(path)).map_err(|e| e.to_string())?;
         limited(&mut f)
     } else if url.starts_with("http://") || url.starts_with("https://") {

@@ -154,7 +154,7 @@ fn work() {
 
 /// 연결하고 인증한 뒤 구독까지 마친다. 실패하면 (사유, 다음 시도까지 기다릴 시간)을 돌려준다.
 fn open() -> Result<(Ipc, BTreeMap<String, Value>), Retry> {
-    let places: Vec<_> = ipc::sockets().into_iter().filter(|p| p.exists()).collect();
+    let places: Vec<_> = ipc::present();
     if places.is_empty() {
         return Err(("Discord 앱이 실행 중이 아닙니다".into(), None));
     }
@@ -204,7 +204,7 @@ fn serve(mut ipc: Ipc, requests: &Receiver<(String, Value, Reply)>) -> Option<St
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use std::io::{Read, Write};
     use std::os::unix::net::{UnixListener, UnixStream};

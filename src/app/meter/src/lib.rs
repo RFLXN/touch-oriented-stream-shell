@@ -9,7 +9,7 @@
 //! 값은 각 항목의 소수점 자릿수(MetricInfo.decimals)에 맞춰 반올림해 반환한다(눈에 보이지 않는 미세 변화로 매번 전송되는 것을 방지).
 //! 속도(디스크, 네트워크)와 CPU 사용률은 이전 측정치와의 차이로 계산하므로 첫 호출 시에는 0이 반환된다.
 //!
-//! 리눅스에서만 동작한다(/proc, /sys 기반). 다른 OS에서는 빈 목록을 반환한다.
+//! 리눅스(/proc, /sys 기반, linux.rs)와 Windows(PDH·DXGI·Win32 API, windows.rs)에서 동작한다. 다른 OS에서는 빈 목록을 반환한다.
 //!
 //! 측정 항목 (실제 존재하는 항목만 catalog에 포함됨)
 //!   cpu, cpu.N       전체 및 코어별 CPU 사용률 (%)               /proc/stat
@@ -33,12 +33,16 @@ pub use toss_proto::MetricInfo;
 
 #[cfg(target_os = "linux")]
 mod linux;
+#[cfg(windows)]
+mod windows;
 
 /// 리소스 샘플러. 속도·사용률 계산을 위해 직전 측정값을 보관한다.
 #[derive(Default)]
 pub struct Sampler {
     #[cfg(target_os = "linux")]
     inner: linux::State,
+    #[cfg(windows)]
+    inner: windows::State,
 }
 
 impl Sampler {
@@ -48,11 +52,11 @@ impl Sampler {
 
     /// 현재 기기에서 측정 가능한 항목 목록을 반환한다(디스크 마운트 변화 등이 있으므로 주기적으로 재조회).
     pub fn catalog(&mut self) -> Vec<MetricInfo> {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", windows))]
         {
             self.inner.catalog()
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", windows)))]
         {
             Vec::new()
         }
@@ -60,11 +64,11 @@ impl Sampler {
 
     /// 지정된 항목만 측정한다. catalog에 없거나 현재 읽을 수 없는 항목은 결과에서 빠진다.
     pub fn sample<S: AsRef<str>>(&mut self, want: &[S]) -> BTreeMap<String, f64> {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", windows))]
         {
             self.inner.sample(want)
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", windows)))]
         {
             let _ = want;
             BTreeMap::new()
@@ -108,15 +112,17 @@ mod tests {
         assert_eq!(round(&info("B", 0), 8.001 * gib), round(&info("B", 0), 8.004 * gib));
     }
 
-    /// 실제 측정 테스트: 리눅스 환경이라면 CPU와 메모리는 반드시 존재하며, 값은 정상 범위 내에 있어야 한다.
-    #[cfg(target_os = "linux")]
+    /// 실제 측정 테스트: 리눅스·Windows 환경이라면 CPU와 메모리는 반드시 존재하며, 값은 정상 범위 내에 있어야 한다.
+    #[cfg(any(target_os = "linux", windows))]
     #[test]
     fn this_machine_can_be_measured() {
         let mut s = Sampler::new();
         let list = s.catalog();
         let ids: Vec<&str> = list.iter().map(|m| m.id.as_str()).collect();
-        for must in ["cpu", "cpu.0", "load", "mem"] {
-            assert!(ids.contains(&must), "{must} 누락: {ids:?}");
+        // Windows에는 부하 평균(load)이 없다
+        let must: &[&str] = if cfg!(windows) { &["cpu", "cpu.0", "mem"] } else { &["cpu", "cpu.0", "load", "mem"] };
+        for must in must {
+            assert!(ids.contains(must), "{must} 누락: {ids:?}");
         }
         let mut seen = std::collections::HashSet::new();
         for m in &list {

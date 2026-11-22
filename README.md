@@ -20,7 +20,7 @@
 | 기기 이미지 | `nix/`, `src/os/`, `src/scripts/` | 메인라인 Linux 6.18 + Alpine Linux 3.24. Nix로 빌드한다 |
 | `tossd` | `src/app/tossd` | 덱에서 동작하는 데몬(Rust) |
 | `toss-shell` | `src/app/ui` | 덱의 UI(QML). Wayland 키오스크(`cage`)에서 전체 화면으로 실행된다 |
-| `toss-connector` | `src/app/host` | PC 측 프로그램(Rust, Linux). 덱에 접속해 PC와 연결하고 웹 콘솔을 제공한다 |
+| `toss-connector` | `src/app/host` | PC 측 프로그램(Rust, Linux·Windows). 덱에 접속해 PC와 연결하고 웹 콘솔을 제공한다 |
 
 저장소의 폴더는 다섯이다.
 
